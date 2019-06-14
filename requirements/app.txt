@@ -1,2 +1,2 @@
-galaxy.plugin.api==0.31
+galaxy.plugin.api==0.34
 pyobjc-framework-CoreServices==5.1.2; sys_platform == 'darwin'
