@@ -10,8 +10,7 @@ import subprocess
 from galaxy.api.plugin import Plugin, create_and_run_plugin
 from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep
 from galaxy.api.errors import (
-    AuthenticationRequired, ApplicationError, BackendError, BackendNotAvailable, BackendTimeout,
-    InvalidCredentials, UnknownBackendResponse, UnknownError
+    AccessDenied, AuthenticationRequired, ApplicationError, InvalidCredentials, UnknownBackendResponse, UnknownError
 )
 from galaxy.api.consts import Platform, LicenseType
 
@@ -79,11 +78,7 @@ class OriginPlugin(Plugin):
             self._pid, self._persona_id, user_name = await self._backend_client.get_identity()
             return Authentication(self._pid, user_name)
 
-        except (BackendNotAvailable, BackendTimeout, BackendError):
-            raise
-        except Exception:
-            # TODO: more precise error reason
-            logging.exception("Authentication failed")
+        except (AccessDenied, InvalidCredentials):
             raise InvalidCredentials()
 
     async def authenticate(self, stored_credentials=None):

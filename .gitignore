@@ -1,0 +1,14 @@
+# pytest
+__pycache__/
+.pytest_cache/
+
+# pyinsaller
+build/
+output/
+*.spec
+.idea
+
+# game description cache
+cache.dat
+cache.bak
+cache.dir
