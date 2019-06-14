@@ -114,10 +114,10 @@ class OriginBackendClient:
             "https://gateway.ea.com/proxy/identity/pids/me"
         )
         data = await pid_response.json()
-        pid = data["pid"]["pidId"]
+        user_id = data["pid"]["pidId"]
 
         persona_id_response = await self._http_client.get(
-            "{}/atom/users?userIds={}".format(self._get_api_host(), pid)
+            "{}/atom/users?userIds={}".format(self._get_api_host(), user_id)
         )
         content = await persona_id_response.text()
 
@@ -126,15 +126,15 @@ class OriginBackendClient:
             persona_id = origin_account_info.find("user").find("personaId").text
             user_name = origin_account_info.find("user").find("EAID").text
 
-            return str(pid), str(persona_id), str(user_name)
+            return str(user_id), str(persona_id), str(user_name)
         except (ET.ParseError, AttributeError):
             logging.exception("Can not parse backend response")
             raise UnknownBackendResponse()
 
-    async def get_entitlements(self, pid):
+    async def get_entitlements(self, user_id):
         url = "{}/ecommerce2/consolidatedentitlements/{}?machine_hash=1".format(
             self._get_api_host(),
-            pid
+            user_id
         )
         headers = {
             "Accept": "application/vnd.origin.v3+json; x-cache/force-write"
@@ -170,20 +170,32 @@ class OriginBackendClient:
                 "metadata": "true"
             }
         )
+        '''
+        "50317_185353_50844": {
+            "platform": "PC Origin",
+            "achievements": {"1": {"complete": True, "u": 1376676315, "name": "Stranger in a Strange Land"}},
+            "expansions": [{"id": "222", "name": "Prestige and Speedlists"}],
+            "name": "Need for Speed™"
+        }
+        '''
+
+        def parse_achievements(achievement_set):
+            return achievement_set.get("achievements", {}) if achievement_set else {}
+
         try:
             data = await response.json()
             return {
-                offer_id: data[achievement_set]["achievements"]
+                offer_id: parse_achievements(data.get(achievement_set))
                 for offer_id, achievement_set in achievement_sets.items()
             }
         except (KeyError, ValueError):
             logging.exception("Can not parse backend response")
             raise UnknownBackendResponse()
 
-    async def get_game_time(self, pid, master_title_id, multiplayer_id):
+    async def get_game_time(self, user_id, master_title_id, multiplayer_id):
         url = "{}/atom/users/{}/games/{}/usage".format(
             self._get_api_host(),
-            pid,
+            user_id,
             master_title_id
         )
 
@@ -215,12 +227,12 @@ class OriginBackendClient:
             logging.exception("Can not parse backend response")
             raise UnknownBackendResponse()
 
-    async def get_friends(self, pid):
+    async def get_friends(self, user_id):
         response = await self._http_client.get(
             "{base_api}/atom/users/{user_id}/other/{other_user_id}/friends?page={page}".format(
                 base_api=self._get_api_host(),
-                user_id=pid,
-                other_user_id=pid,
+                user_id=user_id,
+                other_user_id=user_id,
                 page=0
             )
         )

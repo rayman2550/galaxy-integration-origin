@@ -36,24 +36,24 @@ async def test_not_authenticated(plugin, http_client):
 
 
 @pytest.mark.asyncio
-async def test_no_friends(authenticated_plugin, backend_client, pid):
+async def test_no_friends(authenticated_plugin, backend_client, user_id):
     backend_client.get_friends.return_value = {}
 
     assert [] == await authenticated_plugin.get_friends()
-    backend_client.get_friends.assert_called_once_with(pid)
+    backend_client.get_friends.assert_called_once_with(user_id)
 
 
 @pytest.mark.asyncio
-async def test_multiple_friends(authenticated_plugin, backend_client, pid):
+async def test_multiple_friends(authenticated_plugin, backend_client, user_id):
     backend_client.get_friends.return_value = PARSED_FRIEND_LIST_RESPONSE
 
     assert FRIEND_LIST == await authenticated_plugin.get_friends()
-    backend_client.get_friends.assert_called_once_with(pid)
+    backend_client.get_friends.assert_called_once_with(user_id)
 
 
 @pytest.mark.asyncio
-async def test_profile_parsing(http_client, pid, create_xml_response):
+async def test_profile_parsing(http_client, user_id, create_xml_response):
     http_client.get.return_value = create_xml_response(BACKEND_FRIENDS_RESPONSE)
 
-    assert PARSED_FRIEND_LIST_RESPONSE == await OriginBackendClient(http_client).get_friends(pid)
+    assert PARSED_FRIEND_LIST_RESPONSE == await OriginBackendClient(http_client).get_friends(user_id)
     http_client.get.assert_called_once()

@@ -81,7 +81,7 @@ async def test_not_authenticated(plugin, http_client):
 
 
 @pytest.mark.asyncio
-async def test_get_game_times_empty_cache(authenticated_plugin, backend_client, pid):
+async def test_get_game_times_empty_cache(authenticated_plugin, backend_client, user_id):
     backend_client.get_entitlements.return_value = BACKEND_ENTITLEMENTS_RESPONSE
     backend_client.get_lastplayed_games.return_value = {}
     backend_client.get_offer.side_effect = BACKEND_OFFER_RESPONSES
@@ -89,11 +89,11 @@ async def test_get_game_times_empty_cache(authenticated_plugin, backend_client, 
 
     assert GAME_TIMES == await authenticated_plugin.get_game_times()
 
-    backend_client.get_entitlements.assert_called_once_with(pid)
-    backend_client.get_lastplayed_games.assert_called_once_with(pid)
+    backend_client.get_entitlements.assert_called_once_with(user_id)
+    backend_client.get_lastplayed_games.assert_called_once_with(user_id)
     backend_client.get_offer.assert_has_calls([call(offer_id) for offer_id in OFFER_IDS], any_order=True)
     backend_client.get_game_time.assert_has_calls(
-        [call(pid, MASTER_TITLE_IDS[i], MULTIPLAYER_IDS[i]) for i in range(len(OFFER_IDS))],
+        [call(user_id, MASTER_TITLE_IDS[i], MULTIPLAYER_IDS[i]) for i in range(len(OFFER_IDS))],
         any_order=True
     )
 
@@ -133,7 +133,7 @@ async def test_lastplayed_parsing(persona_id, http_client, create_xml_response):
 
 
 @pytest.mark.asyncio
-async def test_get_game_times_cached_entries(authenticated_plugin, backend_client, pid):
+async def test_get_game_times_cached_entries(authenticated_plugin, backend_client, user_id):
     authenticated_plugin._game_time_cache = {game_time.game_id: game_time for game_time in GAME_TIMES}
 
     new_backend_game_usage_responses = [
@@ -158,11 +158,11 @@ async def test_get_game_times_cached_entries(authenticated_plugin, backend_clien
         for offer_id, response in zip(OFFER_IDS, new_backend_game_usage_responses)
     ] == await authenticated_plugin.get_game_times()
 
-    backend_client.get_entitlements.assert_called_once_with(pid)
-    backend_client.get_lastplayed_games.assert_called_once_with(pid)
+    backend_client.get_entitlements.assert_called_once_with(user_id)
+    backend_client.get_lastplayed_games.assert_called_once_with(user_id)
     backend_client.get_offer.assert_has_calls([call(offer_id) for offer_id in OFFER_IDS], any_order=True)
     backend_client.get_game_time.assert_has_calls(
-        [call(pid, master_title_id, None) for master_title_id in MASTER_TITLE_IDS[1:]],
+        [call(user_id, master_title_id, None) for master_title_id in MASTER_TITLE_IDS[1:]],
         any_order=True
     )
 
@@ -180,7 +180,7 @@ async def test_game_time_import_not_authenticated(plugin, http_client):
 
 
 @pytest.mark.asyncio
-async def test_game_time_import_cached_entries(authenticated_plugin, backend_client, pid, mock_game_time_import_success):
+async def test_game_time_import_cached_entries(authenticated_plugin, backend_client, user_id, mock_game_time_import_success):
     authenticated_plugin._game_time_cache = {game_time.game_id: game_time for game_time in GAME_TIMES}
 
     new_backend_game_usage_responses = [
@@ -205,10 +205,10 @@ async def test_game_time_import_cached_entries(authenticated_plugin, backend_cli
         await asyncio.sleep(0)
 
     backend_client.get_entitlements.assert_not_called()
-    backend_client.get_lastplayed_games.assert_called_once_with(pid)
+    backend_client.get_lastplayed_games.assert_called_once_with(user_id)
     backend_client.get_offer.assert_has_calls([call(offer_id) for offer_id in OFFER_IDS], any_order=True)
     backend_client.get_game_time.assert_has_calls(
-        [call(pid, master_title_id, None) for master_title_id in MASTER_TITLE_IDS[1:]],
+        [call(user_id, master_title_id, None) for master_title_id in MASTER_TITLE_IDS[1:]],
         any_order=True
     )
     mock_game_time_import_success.assert_has_calls([
@@ -218,7 +218,7 @@ async def test_game_time_import_cached_entries(authenticated_plugin, backend_cli
 
 
 @pytest.mark.asyncio
-async def test_game_time_import_empty_cache(authenticated_plugin, backend_client, pid, mock_game_time_import_success):
+async def test_game_time_import_empty_cache(authenticated_plugin, backend_client, user_id, mock_game_time_import_success):
     backend_client.get_entitlements.return_value = BACKEND_ENTITLEMENTS_RESPONSE
     backend_client.get_lastplayed_games.return_value = BACKEND_LASTPLAYED_PARSED
     backend_client.get_offer.side_effect = BACKEND_OFFER_RESPONSES
@@ -230,10 +230,10 @@ async def test_game_time_import_empty_cache(authenticated_plugin, backend_client
         await asyncio.sleep(0)
 
     backend_client.get_entitlements.assert_not_called()
-    backend_client.get_lastplayed_games.assert_called_once_with(pid)
+    backend_client.get_lastplayed_games.assert_called_once_with(user_id)
     backend_client.get_offer.assert_has_calls([call(offer_id) for offer_id in OFFER_IDS], any_order=True)
     backend_client.get_game_time.assert_has_calls(
-        [call(pid, MASTER_TITLE_IDS[i], MULTIPLAYER_IDS[i]) for i in range(len(OFFER_IDS))],
+        [call(user_id, MASTER_TITLE_IDS[i], MULTIPLAYER_IDS[i]) for i in range(len(OFFER_IDS))],
         any_order=True
     )
     mock_game_time_import_success.assert_has_calls([call(game_time) for game_time in GAME_TIMES], any_order=True)

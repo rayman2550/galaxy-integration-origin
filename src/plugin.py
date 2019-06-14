@@ -47,7 +47,7 @@ class OriginPlugin(Plugin):
     # pylint: disable=abstract-method
     def __init__(self, reader, writer, token):
         super().__init__(Platform.Origin, __version__, reader, writer, token)
-        self._pid = None
+        self._user_id = None
         self._persona_id = None
         self._offer_id_cache = {}
         self._game_time_cache: Dict[OfferId, GameTime] = {}
@@ -75,8 +75,8 @@ class OriginPlugin(Plugin):
         try:
             await self._http_client.authenticate(cookies)
 
-            self._pid, self._persona_id, user_name = await self._backend_client.get_identity()
-            return Authentication(self._pid, user_name)
+            self._user_id, self._persona_id, user_name = await self._backend_client.get_identity()
+            return Authentication(self._user_id, user_name)
 
         except (AccessDenied, InvalidCredentials):
             raise InvalidCredentials()
@@ -143,7 +143,7 @@ class OriginPlugin(Plugin):
         error = UnknownError()
         try:
             achievement_sets = {}  # 'offerId' to 'achievementSet' names mapping
-            for offer_id, achievement_set in (await self._backend_client.get_achievements_sets(self._persona_id)).items():
+            for offer_id, achievement_set in (await self._backend_client.get_achievements_sets(self._user_id)).items():
                 if not achievement_set:
                     self.game_achievements_import_success(offer_id, [])
                     game_ids.remove(offer_id)
@@ -165,14 +165,15 @@ class OriginPlugin(Plugin):
                     self.game_achievements_import_failure(offer_id, UnknownBackendResponse())
                 except ApplicationError as error:
                     self.game_achievements_import_failure(offer_id, error)
+                except:
+                    logging.exception("Unhandled exception. Please report it to the plugin developers")
+                    self.game_achievements_import_failure(offer_id, UnknownError())
                 finally:
                     game_ids.remove(offer_id)
         except KeyError:
             error = UnknownBackendResponse()
         except ApplicationError as _error:
             error = _error
-        except Exception:
-            pass  # handled below
         finally:
             # any other exceptions or not answered game_ids are responded with an error
             [self.game_achievements_import_failure(game_id, error) for game_id in game_ids]
@@ -205,7 +206,7 @@ class OriginPlugin(Plugin):
         return offers
 
     async def _get_owned_offers(self):
-        entitlements = await self._backend_client.get_entitlements(self._pid)
+        entitlements = await self._backend_client.get_entitlements(self._user_id)
 
         # filter
         entitlements = [x for x in entitlements if x["offerType"] == "basegame"]
@@ -287,7 +288,7 @@ class OriginPlugin(Plugin):
         if cached_game_time is not None:
             return cached_game_time
 
-        response = await self._backend_client.get_game_time(self._pid, master_title_id, multiplayer_id)
+        response = await self._backend_client.get_game_time(self._user_id, master_title_id, multiplayer_id)
         game_time: GameTime = GameTime(offer_id, response[0], response[1])
         self._game_time_cache[offer_id] = game_time
         return game_time
@@ -298,7 +299,7 @@ class OriginPlugin(Plugin):
 
         owned_offers, last_played_games = await asyncio.gather(
             self._get_owned_offers(),
-            self._backend_client.get_lastplayed_games(self._pid)
+            self._backend_client.get_lastplayed_games(self._user_id)
         )
 
         requests = []
@@ -323,7 +324,7 @@ class OriginPlugin(Plugin):
 
         _, self._last_played_games = await asyncio.gather(
             self._get_offers(game_ids),  # update local cache ignoring return value
-            self._backend_client.get_lastplayed_games(self._pid)
+            self._backend_client.get_lastplayed_games(self._user_id)
         )
 
         await super().start_game_times_import(game_ids)
@@ -349,7 +350,7 @@ class OriginPlugin(Plugin):
                 self.game_time_import_failure(offer_id, UnknownBackendResponse())
             except ApplicationError as error:
                 self.game_time_import_failure(offer_id, error)
-            except Exception:
+            except:
                 logging.exception("Unhandled exception. Please report it to the plugin developers")
                 self.game_time_import_failure(offer_id, UnknownError())
 
@@ -362,7 +363,7 @@ class OriginPlugin(Plugin):
 
         return [
             FriendInfo(user_id=str(user_id), user_name=str(user_name))
-            for user_id, user_name in (await self._backend_client.get_friends(self._pid)).items()
+            for user_id, user_name in (await self._backend_client.get_friends(self._user_id)).items()
         ]
 
     @staticmethod

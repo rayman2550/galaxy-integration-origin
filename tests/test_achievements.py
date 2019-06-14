@@ -247,12 +247,12 @@ async def test_not_authenticated(plugin, http_client, mock_import_achievements_f
 
 
 @pytest.mark.asyncio
-async def test_get_achievements(authenticated_plugin, persona_id, backend_client, mock_import_achievements_success):
+async def test_get_achievements(authenticated_plugin, persona_id, user_id, backend_client, mock_import_achievements_success):
     backend_client.get_achievements.return_value = ACHIEVEMENT_SETS_BACKEND_PARSED
     backend_client.get_achievements_sets.return_value = OFFER_IDS
 
     await authenticated_plugin.import_games_achievements(OFFER_IDS.keys())
-    backend_client.get_achievements_sets.assert_called_once_with(persona_id)
+    backend_client.get_achievements_sets.assert_called_once_with(user_id)
     backend_client.get_achievements.assert_called_once_with(persona_id, OFFER_IDS_ACH)
 
     mock_import_achievements_success.assert_has_calls(
@@ -281,11 +281,11 @@ async def test_get_achievements_old(authenticated_plugin, persona_id, backend_cl
 
 
 @pytest.mark.asyncio
-async def test_achievements_parsing(pid, http_client, create_json_response):
+async def test_achievements_parsing(persona_id, http_client, create_json_response):
     http_client.get.return_value = create_json_response(ACHIEVEMENT_SETS_BACKEND_RESPONSE)
 
     assert ACHIEVEMENT_SETS_BACKEND_PARSED == \
-        await OriginBackendClient(http_client).get_achievements(pid, OFFER_IDS_ACH)
+        await OriginBackendClient(http_client).get_achievements(persona_id, OFFER_IDS_ACH)
 
     http_client.get.assert_called_once()
 

@@ -13,12 +13,12 @@ def test_no_stored_credentials(plugin, http_client, backend_client):
     cookies = {
         "cookie": "value"
     }
-    pid = "13"
+    user_id = "13"
     persona_id = "19"
     user_name = "Jan"
 
     http_client.authenticate.return_value = None
-    backend_client.get_identity.return_value = pid, persona_id, user_name
+    backend_client.get_identity.return_value = user_id, persona_id, user_name
 
     with patch.object(plugin, "store_credentials") as store_credentials:
         result = loop.run_until_complete(plugin.authenticate())
@@ -33,7 +33,7 @@ def test_no_stored_credentials(plugin, http_client, backend_client):
             "whatever credentials",
             [{"name": key, "value": value} for key, value in cookies.items()]
         ))
-        assert result == Authentication(pid, user_name)
+        assert result == Authentication(user_id, user_name)
         store_credentials.assert_called_with(credentials)
 
     http_client.authenticate.assert_called_with(cookies)
@@ -43,7 +43,7 @@ def test_no_stored_credentials(plugin, http_client, backend_client):
 def test_stored_credentials(plugin, http_client, backend_client):
     loop = asyncio.get_event_loop()
 
-    pid = "13"
+    user_id = "13"
     persona_id = "19"
     user_name = "Jan"
 
@@ -55,11 +55,11 @@ def test_stored_credentials(plugin, http_client, backend_client):
     }
 
     http_client.authenticate.return_value = None
-    backend_client.get_identity.return_value = pid, persona_id, user_name
+    backend_client.get_identity.return_value = user_id, persona_id, user_name
 
     with patch.object(plugin, "store_credentials") as store_credentials:
         result = loop.run_until_complete(plugin.authenticate(credentials))
-        assert result == Authentication(pid, user_name)
+        assert result == Authentication(user_id, user_name)
         store_credentials.assert_not_called()
 
     http_client.authenticate.assert_called_with(cookies)
@@ -69,7 +69,7 @@ def test_stored_credentials(plugin, http_client, backend_client):
 def test_updated_cookies(plugin, http_client, backend_client):
     loop = asyncio.get_event_loop()
 
-    pid = "13"
+    user_id = "13"
     persona_id = "19"
     user_name = "Jan"
 
@@ -94,13 +94,13 @@ def test_updated_cookies(plugin, http_client, backend_client):
     def get_identity():
         callback = http_client.set_cookies_updated_callback.call_args[0][0]
         callback([morsel])
-        return pid, persona_id, user_name
+        return user_id, persona_id, user_name
 
     backend_client.get_identity.side_effect = get_identity
 
     with patch.object(plugin, "store_credentials") as store_credentials:
         result = loop.run_until_complete(plugin.authenticate(credentials))
-        assert result == Authentication(pid, user_name)
+        assert result == Authentication(user_id, user_name)
         store_credentials.assert_called_with(new_credentials)
 
     http_client.authenticate.assert_called_with(cookies)

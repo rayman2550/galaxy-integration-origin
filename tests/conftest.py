@@ -8,7 +8,7 @@ from plugin import OriginPlugin
 from tests.async_mock import AsyncMock
 
 @pytest.fixture()
-def pid():
+def user_id():
     return 2413515122
 
 @pytest.fixture()
@@ -79,13 +79,13 @@ def plugin(create_plugin):
     return create_plugin()
 
 @pytest.fixture()
-def authenticated_plugin(create_plugin, http_client, backend_client, pid, persona_id):
+def authenticated_plugin(create_plugin, http_client, backend_client, user_id, persona_id):
     loop = asyncio.get_event_loop()
 
     plugin = create_plugin()
 
     http_client.authenticate.return_value = None
-    backend_client.get_identity.return_value = pid, persona_id, "Jan"
+    backend_client.get_identity.return_value = user_id, persona_id, "Jan"
     credentials = {
         "cookies": {
             "cookie": "value"
