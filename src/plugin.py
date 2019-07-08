@@ -1,11 +1,12 @@
 import asyncio
-import sys
-import time
-from functools import partial
-import webbrowser
+import json
 import logging
 import platform
+import sys
 import subprocess
+import time
+import webbrowser
+from functools import partial, wraps
 
 from galaxy.api.plugin import Plugin, create_and_run_plugin
 from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep
@@ -43,14 +44,23 @@ AUTH_PARAMS = {
 MultiplayerId = NewType("MultiplayerId", str)
 
 
+def using_cache(method):
+    @wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        result = await method(self, *args, **kwargs)
+        if self._persistent_cache_updated:
+            self.push_cache()
+            self._persistent_cache_updated = False
+        return result
+    return wrapper
+
+
 class OriginPlugin(Plugin):
     # pylint: disable=abstract-method
     def __init__(self, reader, writer, token):
         super().__init__(Platform.Origin, __version__, reader, writer, token)
         self._user_id = None
         self._persona_id = None
-        self._offer_id_cache = {}
-        self._game_time_cache: Dict[OfferId, GameTime] = {}
         self._last_played_games: Dict[MasterTitleId, Timestamp] = {}
 
         self._local_games = LocalGames(get_local_content_path())
@@ -64,12 +74,26 @@ class OriginPlugin(Plugin):
         self._http_client.set_auth_lost_callback(auth_lost)
         self._http_client.set_cookies_updated_callback(self._update_stored_cookies)
         self._backend_client = OriginBackendClient(self._http_client)
+        self._persistent_cache_updated = False
+
+    @property
+    def _game_time_cache(self):
+        return self.persistent_cache.setdefault("game_time", {})
+
+    @property
+    def _offer_id_cache(self):
+        return self.persistent_cache.setdefault("offers", {})
 
     def shutdown(self):
         asyncio.create_task(self._http_client.close())
 
     def tick(self):
         self.handle_local_game_update_notifications()
+
+    def _check_authenticated(self):
+        if not self._http_client.is_authenticated():
+            logging.exception("Plugin not authenticated")
+            raise AuthenticationRequired("Plugin not authenticated")
 
     async def _do_authenticate(self, cookies):
         try:
@@ -78,8 +102,9 @@ class OriginPlugin(Plugin):
             self._user_id, self._persona_id, user_name = await self._backend_client.get_identity()
             return Authentication(self._user_id, user_name)
 
-        except (AccessDenied, InvalidCredentials):
-            raise InvalidCredentials()
+        except (AccessDenied, InvalidCredentials) as e:
+            logging.exception("Failed to authenticate")
+            raise InvalidCredentials(str(e))
 
     async def authenticate(self, stored_credentials=None):
         stored_cookies = stored_credentials.get("cookies") if stored_credentials else None
@@ -96,8 +121,7 @@ class OriginPlugin(Plugin):
         return auth_info
 
     async def get_owned_games(self):
-        if not self._http_client.is_authenticated():
-            raise AuthenticationRequired()
+        self._check_authenticated()
 
         owned_offers = await self._get_owned_offers()
 
@@ -114,9 +138,9 @@ class OriginPlugin(Plugin):
         return games
 
     # Left for backward compatibility, until feature detection uses transactional methods
+    @using_cache
     async def get_unlocked_achievements(self, game_id):
-        if not self._http_client.is_authenticated():
-            raise AuthenticationRequired()
+        self._check_authenticated()
 
         try:
             achievement_set = (await self._get_offers([game_id]))[0]["platforms"][0]["achievementSetOverride"]
@@ -129,18 +153,18 @@ class OriginPlugin(Plugin):
                 Achievement(achievement_id=key, achievement_name=value["name"], unlock_time=value["u"])
                 for key, value in achievements[game_id].items() if value["complete"]
             ]
-        except (KeyError, IndexError):
-            raise UnknownBackendResponse()
+        except (KeyError, IndexError) as e:
+            logging.exception("Failed to import achievements")
+            raise UnknownBackendResponse(str(e))
 
     async def start_achievements_import(self, game_ids):
-        if not self._http_client.is_authenticated():
-            raise AuthenticationRequired
+        self._check_authenticated()
 
         await super().start_achievements_import(game_ids)
 
     async def import_games_achievements(self, _game_ids):
         game_ids = set(_game_ids)
-        error = UnknownError()
+        error = UnknownError("Not processed game")
         try:
             achievement_sets = {}  # 'offerId' to 'achievementSet' names mapping
             for offer_id, achievement_set in (await self._backend_client.get_achievements_sets(self._user_id)).items():
@@ -161,23 +185,26 @@ class OriginPlugin(Plugin):
                         Achievement(achievement_id=key, achievement_name=value["name"], unlock_time=value["u"])
                         for key, value in achievements.items() if value["complete"]
                     ])
-                except KeyError:
-                    self.game_achievements_import_failure(offer_id, UnknownBackendResponse())
+                except KeyError as e:
+                    self.game_achievements_import_failure(offer_id, UnknownBackendResponse(str(e)))
                 except ApplicationError as error:
                     self.game_achievements_import_failure(offer_id, error)
-                except:
+                except Exception as e:
                     logging.exception("Unhandled exception. Please report it to the plugin developers")
-                    self.game_achievements_import_failure(offer_id, UnknownError())
+                    self.game_achievements_import_failure(offer_id, UnknownError(str(e)))
                 finally:
                     game_ids.remove(offer_id)
-        except KeyError:
-            error = UnknownBackendResponse()
+        except KeyError as e:
+            logging.exception("Failed to import achievements")
+            error = UnknownBackendResponse(str(e))
         except ApplicationError as _error:
+            logging.exception("Failed to import achievements")
             error = _error
         finally:
             # any other exceptions or not answered game_ids are responded with an error
             [self.game_achievements_import_failure(game_id, error) for game_id in game_ids]
 
+    @using_cache
     async def _get_offers(self, offer_ids):
         """
             Get offers from cache if exists.
@@ -202,6 +229,8 @@ class OriginPlugin(Plugin):
                 offer_id = offer["offerId"]
                 offers.append(offer)
                 self._offer_id_cache[offer_id] = offer
+
+            self._persistent_cache_updated = True
 
         return offers
 
@@ -291,11 +320,12 @@ class OriginPlugin(Plugin):
         response = await self._backend_client.get_game_time(self._user_id, master_title_id, multiplayer_id)
         game_time: GameTime = GameTime(offer_id, response[0], response[1])
         self._game_time_cache[offer_id] = game_time
+        self._persistent_cache_updated = True
         return game_time
 
+    @using_cache
     async def get_game_times(self):
-        if not self._http_client.is_authenticated():
-            raise AuthenticationRequired()
+        self._check_authenticated()
 
         owned_offers, last_played_games = await asyncio.gather(
             self._get_owned_offers(),
@@ -313,14 +343,14 @@ class OriginPlugin(Plugin):
                     multiplayer_id=self._get_multiplayer_id(offer),
                     lastplayed_time=last_played_games.get(master_title_id)
                 ))
-        except KeyError:
-            raise UnknownBackendResponse()
+        except KeyError as e:
+            logging.exception("Failed to import game times")
+            raise UnknownBackendResponse(str(e))
 
         return await asyncio.gather(*requests)
 
     async def start_game_times_import(self, game_ids):
-        if not self._http_client.is_authenticated():
-            raise AuthenticationRequired()
+        self._check_authenticated()
 
         _, self._last_played_games = await asyncio.gather(
             self._get_offers(game_ids),  # update local cache ignoring return value
@@ -329,6 +359,7 @@ class OriginPlugin(Plugin):
 
         await super().start_game_times_import(game_ids)
 
+    @using_cache
     async def import_game_times(self, game_ids: List[OfferId]):
         async def import_game_time(offer_id: OfferId):
             try:
@@ -346,20 +377,22 @@ class OriginPlugin(Plugin):
                         self._last_played_games.get(master_title_id)
                     )
                 )
-            except KeyError:
-                self.game_time_import_failure(offer_id, UnknownBackendResponse())
+            except KeyError as e:
+                logging.exception("Failed to import game times")
+                self.game_time_import_failure(offer_id, UnknownBackendResponse(str(e)))
             except ApplicationError as error:
+                logging.exception("Failed to import game times")
                 self.game_time_import_failure(offer_id, error)
-            except:
+            except Exception as e:
+                logging.exception("Failed to import game times")
                 logging.exception("Unhandled exception. Please report it to the plugin developers")
-                self.game_time_import_failure(offer_id, UnknownError())
+                self.game_time_import_failure(offer_id, UnknownError(str(e)))
 
         await asyncio.gather(*[import_game_time(offer_id) for offer_id in game_ids])
         self._last_played_games = None
 
     async def get_friends(self):
-        if not self._http_client.is_authenticated():
-            raise AuthenticationRequired()
+        self._check_authenticated()
 
         return [
             FriendInfo(user_id=str(user_id), user_name=str(user_name))
@@ -389,13 +422,23 @@ class OriginPlugin(Plugin):
             await loop.run_in_executor(None, partial(subprocess.run, ["control", "appwiz.cpl"]))
 
     def _store_cookies(self, cookies):
-        self.store_credentials({"cookies": cookies})
+        credentials = {
+            "cookies": cookies
+        }
+        self.store_credentials(credentials)
 
     def _update_stored_cookies(self, morsels):
         cookies = {}
         for morsel in morsels:
             cookies[morsel.key] = morsel.value
         self._store_cookies(cookies)
+
+    def handshake_complete(self):
+        # parse caches
+        for key in ("offers", "game_time"):
+            cache = self.persistent_cache.get(key)
+            if cache:
+                self.persistent_cache[key] = json.loads(cache)
 
 
 def main():

@@ -133,8 +133,15 @@ async def test_lastplayed_parsing(persona_id, http_client, create_xml_response):
 
 
 @pytest.mark.asyncio
-async def test_get_game_times_cached_entries(authenticated_plugin, backend_client, user_id):
-    authenticated_plugin._game_time_cache = {game_time.game_id: game_time for game_time in GAME_TIMES}
+async def test_get_game_times_cached_entries(authenticated_plugin, backend_client, user_id, mocker):
+    mocker.patch.object(
+        type(authenticated_plugin),
+        "persistent_cache",
+        new_callable=mocker.PropertyMock,
+        return_value={
+            "game_time": {game_time.game_id: game_time for game_time in GAME_TIMES}
+        }
+    )
 
     new_backend_game_usage_responses = [
         (10, 1451288960),   # same time, no update
@@ -180,8 +187,21 @@ async def test_game_time_import_not_authenticated(plugin, http_client):
 
 
 @pytest.mark.asyncio
-async def test_game_time_import_cached_entries(authenticated_plugin, backend_client, user_id, mock_game_time_import_success):
-    authenticated_plugin._game_time_cache = {game_time.game_id: game_time for game_time in GAME_TIMES}
+async def test_game_time_import_cached_entries(
+    authenticated_plugin,
+    backend_client,
+    user_id,
+    mock_game_time_import_success,
+    mocker
+):
+    mocker.patch.object(
+        type(authenticated_plugin),
+        "persistent_cache",
+        new_callable=mocker.PropertyMock,
+        return_value={
+            "game_time": {game_time.game_id: game_time for game_time in GAME_TIMES}
+        }
+    )
 
     new_backend_game_usage_responses = [
         (10, 1451288960),  # same time, no update
