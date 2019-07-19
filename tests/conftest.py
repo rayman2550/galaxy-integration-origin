@@ -1,23 +1,26 @@
 import asyncio
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from plugin import OriginPlugin
-
 from tests.async_mock import AsyncMock
+
 
 @pytest.fixture()
 def user_id():
     return 2413515122
 
+
 @pytest.fixture()
 def persona_id():
     return "355295261"
 
+
 @pytest.fixture()
 def access_token():
     return "QVQxOjEuMEozLjA6NjA6akZRTzQ0MVYrRHoyV29SdTFpeHZYbFpzanpZVTVRMWthM4E6MzUyMjI6b2tvOWs"
+
 
 @pytest.fixture()
 def local_games_path(tmpdir):
@@ -25,13 +28,15 @@ def local_games_path(tmpdir):
         mock_local_games_path.return_value = tmpdir
         yield mock_local_games_path
 
+
 @pytest.fixture
-def http_client(spec=()):
+def http_client():
     mock = MagicMock(spec=("set_auth_lost_callback", "set_cookies_updated_callback", "is_authenticated"))
     mock.authenticate = AsyncMock()
     mock.get = AsyncMock()
 
     return mock
+
 
 @pytest.fixture
 def create_json_response():
@@ -42,6 +47,7 @@ def create_json_response():
 
     return function
 
+
 @pytest.fixture
 def create_xml_response():
     def function(text):
@@ -50,6 +56,7 @@ def create_xml_response():
         return response
 
     return function
+
 
 @pytest.fixture
 def backend_client():
@@ -65,8 +72,14 @@ def backend_client():
 
     return mock
 
+
 @pytest.fixture()
-def create_plugin(cache, local_games_path, http_client, backend_client):
+def process_iter_mock(mocker):
+    return mocker.patch("local_games.process_iter")
+
+
+@pytest.fixture()
+def create_plugin(process_iter_mock, cache, local_games_path, http_client, backend_client):
     def function():
         with patch("plugin.AuthenticatedHttpClient", return_value=http_client):
             with patch("plugin.OriginBackendClient", return_value=backend_client):
@@ -74,9 +87,11 @@ def create_plugin(cache, local_games_path, http_client, backend_client):
 
     return function
 
+
 @pytest.fixture()
 def plugin(create_plugin):
     return create_plugin()
+
 
 @pytest.fixture()
 def authenticated_plugin(create_plugin, http_client, backend_client, user_id, persona_id):

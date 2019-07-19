@@ -1,12 +1,13 @@
-import os
 import json
-import subprocess
-import socket
+import os
 import platform
+import socket
+import subprocess
 
 import pytest
 
 TIMEOUT = 5
+
 
 class TCPServer:
     def __init__(self, bind_interface="0.0.0.0", bind_port=0):
@@ -19,6 +20,7 @@ class TCPServer:
         '''Returns connected socket'''
         self._sock.settimeout(timeout)
         return self._sock.accept()[0]
+
 
 @pytest.mark.integration
 def test_integration():
@@ -40,7 +42,7 @@ def test_integration():
 
     plugin_socket = server.accept_connection(TIMEOUT)
     plugin_socket.settimeout(TIMEOUT)
-    plugin_socket.sendall((json.dumps(request)+"\n").encode("utf-8"))
+    plugin_socket.sendall((json.dumps(request) + "\n").encode("utf-8"))
     response = json.loads(plugin_socket.recv(4096))
     print(response)
     expected_response = {
