@@ -120,13 +120,17 @@ if platform.system() == "Windows":
             if not windll.psapi.EnumProcesses(byref(proc_id_list), sizeof(proc_id_list), byref(result_size)):
                 raise WinError(descr="Failed to get process ID list: %s" % FormatError())
 
-            return int(result_size.value / sizeof(_PROC_ID_T())), proc_id_list
+            size = int(result_size.value / sizeof(_PROC_ID_T()))
+            return proc_id_list[:size]
 
-        result_count, proc_id_list = try_get_info_list(list_size)
-        if result_count > list_size:
-            result_count, proc_id_list = try_get_info_list(result_count)
+        while True:
+            proc_id_list = try_get_info_list(list_size)
+            if len(proc_id_list) < list_size:
+                return proc_id_list
+            # if returned collection is not smaller than list size it indicates that some pids have not fitted
+            list_size *= 2
 
-        return set(proc_id_list[:result_count])
+        return set(proc_id_list)
 
 
     def process_iter() -> Iterator[Tuple[int, str]]:
@@ -199,8 +203,8 @@ def get_state_changes(old_list, new_list):
     # state changed
     result.extend(
         LocalGame(game_id, new_dict[game_id])
-            for game_id in new_dict.keys() & old_dict.keys()
-            if new_dict[game_id] != old_dict[game_id]
+        for game_id in new_dict.keys() & old_dict.keys()
+        if new_dict[game_id] != old_dict[game_id]
     )
     return result
 

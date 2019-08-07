@@ -1,16 +1,16 @@
-import aiohttp
 import logging
 import random
 import xml.etree.ElementTree as ET
-
 from datetime import datetime
-from yarl import URL
 from typing import Dict, NewType
+
+import aiohttp
 from galaxy.api.errors import (
-    BackendNotAvailable, BackendTimeout, BackendError, UnknownBackendResponse,
-    AccessDenied, AuthenticationRequired, NetworkError
+    AccessDenied, ApplicationError, AuthenticationRequired, BackendError, BackendNotAvailable,
+    BackendTimeout, NetworkError, UnknownBackendResponse
 )
 from galaxy.http import HttpClient
+from yarl import URL
 
 MasterTitleId = NewType("MasterTitleId", str)
 OfferId = NewType("OfferId", str)
@@ -160,36 +160,48 @@ class OriginBackendClient:
             logging.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse(str(e))
 
-    async def get_achievements(self, persona_id: str, achievement_sets: Dict[str, str]):
-        response = await self._http_client.get(
-            "https://achievements.gameservices.ea.com/achievements/personas/{persona_id}/all".format(
-                persona_id=persona_id
-            ),
-            params={
-                "lang": "en_US",
-                "metadata": "true"
-            }
-        )
-        '''
-        "50317_185353_50844": {
-            "platform": "PC Origin",
-            "achievements": {"1": {"complete": True, "u": 1376676315, "name": "Stranger in a Strange Land"}},
-            "expansions": [{"id": "222", "name": "Prestige and Speedlists"}],
-            "name": "Need for Speed™"
-        }
-        '''
+    async def get_achievements(self, persona_id: str, achievement_sets: Dict[OfferId, str]) -> Dict[OfferId, Dict]:
+        async def get_sets_data(achievement_set: str = None) -> Dict:
+            response = await self._http_client.get(
+                "https://achievements.gameservices.ea.com/achievements/personas/{persona_id}{ach_set}/all".format(
+                    persona_id=persona_id, ach_set=("/" + achievement_set) if achievement_set else ""
+                ),
+                params={
+                    "lang": "en_US",
+                    "metadata": "true"
+                }
+            )
 
-        def parse_achievements(achievement_set):
-            return achievement_set.get("achievements", {}) if achievement_set else {}
+            '''
+            "50317_185353_50844": {
+                "platform": "PC Origin",
+                "achievements": {"1": {"complete": True, "u": 1376676315, "name": "Stranger in a Strange Land"}},
+                "expansions": [{"id": "222", "name": "Prestige and Speedlists"}],
+                "name": "Need for Speed™"
+            }
+            '''
+            return await response.json()
 
         try:
-            data = await response.json()
+            all_sets = await get_sets_data()
+
+            async def fetch_achievements(achievement_set):
+                achievements_set = all_sets.get(achievement_set)
+                # for some games(e.g.: ApexLegends) achievement set is not present in "all". have to fetch it explicitly
+                if achievements_set is None:
+                    return await get_sets_data(achievement_set)
+
+                return achievements_set["achievements"]
+
             return {
-                offer_id: parse_achievements(data.get(achievement_set))
+                offer_id: await fetch_achievements(achievement_set)
                 for offer_id, achievement_set in achievement_sets.items()
             }
+
+        except ApplicationError:
+            raise
         except (KeyError, ValueError) as e:
-            logging.exception("Can not parse backend response: %s", await response.text())
+            logging.exception("Can not parse backend response")
             raise UnknownBackendResponse(str(e))
 
     async def get_game_time(self, user_id, master_title_id, multiplayer_id):
@@ -262,7 +274,7 @@ class OriginBackendClient:
             logging.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse()
 
-    async def get_achievements_sets(self, user_id) -> Dict[str, str]:
+    async def get_achievements_sets(self, user_id) -> Dict[OfferId, str]:
         response = await self._http_client.get("{base_api}/atom/users/{user_id}/other/{other_user_id}/games".format(
             base_api=self._get_api_host(),
             user_id=user_id,

@@ -44,6 +44,7 @@ def test_integration():
     plugin_socket.settimeout(TIMEOUT)
     plugin_socket.sendall((json.dumps(request) + "\n").encode("utf-8"))
     response = json.loads(plugin_socket.recv(4096))
+    response["result"]["features"] = set(response["result"]["features"])
     print(response)
     expected_response = {
         "id": "3",
@@ -54,7 +55,7 @@ def test_integration():
         }
     }
     if platform.system().lower() == "windows":
-        expected_response["result"]["features"] = [
+        expected_response["result"]["features"] = {
             "ImportOwnedGames",
             "ImportAchievements",
             "ImportInstalledGames",
@@ -63,9 +64,9 @@ def test_integration():
             "UninstallGame",
             "ImportFriends",
             "ImportGameTime"
-        ]
+        }
     else:
-        expected_response["result"]["features"] = [
+        expected_response["result"]["features"] = {
             "ImportOwnedGames",
             "ImportAchievements",
             "ImportInstalledGames",
@@ -73,7 +74,7 @@ def test_integration():
             "InstallGame",
             "ImportFriends",
             "ImportGameTime"
-        ]
+        }
     assert response == expected_response, "Response differs from expected"
 
     plugin_socket.close()

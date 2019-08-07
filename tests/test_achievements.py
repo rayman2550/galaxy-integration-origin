@@ -261,33 +261,35 @@ async def test_get_achievements(authenticated_plugin, persona_id, user_id, backe
     )
 
 
-# Left for backward compatibility, until feature detection uses transactional methods
 @pytest.mark.asyncio
-async def test_get_achievements_old(authenticated_plugin, persona_id, backend_client, mock_import_achievements_success):
-    offer_id = "OFB-EAST:50885"
-    backend_client.get_offer.return_value = {
-        "offerId": offer_id,
-        "platforms": [{
-            "platform": "PCWIN",
-            "achievementSetOverride": OFFER_IDS_ACH[offer_id],
-        }]
+async def test_get_explicit_achievements(persona_id, http_client, create_json_response):
+    explicit_offer_id = "explicit_offer_id"
+    explicit_set_id = "explicit_set_id"
+    explicit_set = {
+        "ACH00": {
+            "complete": True,
+            "u": 1564564308,
+            "name": "The Player",
+        }
     }
-    backend_client.get_achievements.return_value = {offer_id: ACHIEVEMENT_SETS_BACKEND_PARSED[offer_id]}
+    http_client.get.side_effect = [
+        create_json_response(ACHIEVEMENT_SETS_BACKEND_RESPONSE),
+        create_json_response(explicit_set)
+    ]
 
-    assert ACHIEVEMENTS[offer_id] == await authenticated_plugin.get_unlocked_achievements(offer_id)
-    backend_client.get_offer.assert_called_once_with(offer_id)
+    achievement_sets = dict(OFFER_IDS_ACH, **{explicit_offer_id: explicit_set_id})
 
-    backend_client.get_achievements.assert_called_once_with(persona_id, {offer_id: OFFER_IDS_ACH[offer_id]})
+    assert dict(ACHIEVEMENT_SETS_BACKEND_PARSED, **{explicit_offer_id: explicit_set}) == \
+        await OriginBackendClient(http_client).get_achievements(persona_id, achievement_sets)
 
-
-@pytest.mark.asyncio
-async def test_achievements_parsing(persona_id, http_client, create_json_response):
-    http_client.get.return_value = create_json_response(ACHIEVEMENT_SETS_BACKEND_RESPONSE)
-
-    assert ACHIEVEMENT_SETS_BACKEND_PARSED == \
-        await OriginBackendClient(http_client).get_achievements(persona_id, OFFER_IDS_ACH)
-
-    http_client.get.assert_called_once()
+    http_client.get.assert_has_calls([
+        call("https://achievements.gameservices.ea.com/achievements/personas/{persona_id}/all".format(
+            persona_id=persona_id
+        ), params={'lang': 'en_US', 'metadata': 'true'}),
+        call("https://achievements.gameservices.ea.com/achievements/personas/{persona_id}/{set}/all".format(
+            persona_id=persona_id, set=explicit_set_id
+        ), params={'lang': 'en_US', 'metadata': 'true'})
+    ])
 
 
 BACKEND_GAMES_RESPONSE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
