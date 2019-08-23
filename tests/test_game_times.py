@@ -4,6 +4,7 @@ from unittest.mock import call
 import pytest
 from galaxy.api.errors import AuthenticationRequired
 from galaxy.api.types import GameTime
+from galaxy.unittest.mock import async_return_value
 
 from plugin import OriginBackendClient
 
@@ -72,6 +73,20 @@ BACKEND_GAME_USAGE_RESPONSES = [
     (0, 0)
 ]
 
+NEW_BACKEND_GAME_USAGE_RESPONSES = [
+    (10, 1451288960),  # same time, no update
+    (125, 1551288965),  # newer endtime, updated
+    (120, 1551288960),  # missing in new 'last_played' response
+    (5, 1551288965)  # previously missing
+]
+
+LASTPLAYED_GAMES = {
+    MASTER_TITLE_IDS[0]: NEW_BACKEND_GAME_USAGE_RESPONSES[0][1],
+    MASTER_TITLE_IDS[1]: NEW_BACKEND_GAME_USAGE_RESPONSES[1][1],
+    # MASTER_TITLE_IDS[2] previously existed, now missing
+    MASTER_TITLE_IDS[3]: NEW_BACKEND_GAME_USAGE_RESPONSES[3][1]
+}
+
 GAME_TIMES = [GameTime(OFFER_IDS[i], *BACKEND_GAME_USAGE_RESPONSES[i]) for i in range(len(OFFER_IDS))]
 
 
@@ -79,7 +94,7 @@ GAME_TIMES = [GameTime(OFFER_IDS[i], *BACKEND_GAME_USAGE_RESPONSES[i]) for i in 
 async def test_not_authenticated(plugin, http_client):
     http_client.is_authenticated.return_value = False
     with pytest.raises(AuthenticationRequired):
-        await plugin.start_game_times_import([])
+        await plugin.prepare_game_times_context([])
 
 
 BACKEND_LASTPLAYED_RESPONSE = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -117,16 +132,23 @@ async def test_lastplayed_parsing(persona_id, http_client, create_xml_response):
     http_client.get.assert_called_once()
 
 
-@pytest.fixture
-def mock_game_time_import_success(mocker):
-    return mocker.patch("plugin.OriginPlugin.game_time_import_success")
-
-
 @pytest.mark.asyncio
-async def test_game_time_import_not_authenticated(plugin, http_client):
-    http_client.is_authenticated.return_value = False
-    with pytest.raises(AuthenticationRequired):
-        await plugin.start_game_times_import(OFFER_IDS)
+async def test_prepare_game_times_context(
+    authenticated_plugin,
+    backend_client,
+    user_id,
+    mocker
+):
+    get_offers_mock = mocker.patch(
+        "plugin.OriginPlugin._get_offers",
+        return_value=async_return_value(mocker.patch("plugin.OriginPlugin._get_offers"))
+    )
+    backend_client.get_lastplayed_games.return_value = async_return_value(LASTPLAYED_GAMES)
+
+    assert LASTPLAYED_GAMES == await authenticated_plugin.prepare_game_times_context(OFFER_IDS)
+
+    get_offers_mock.assert_called_once_with(OFFER_IDS)
+    backend_client.get_lastplayed_games.assert_called_once_with(user_id)
 
 
 @pytest.mark.asyncio
@@ -134,7 +156,6 @@ async def test_game_time_import_cached_entries(
     authenticated_plugin,
     backend_client,
     user_id,
-    mock_game_time_import_success,
     mocker
 ):
     mocker.patch.object(
@@ -146,49 +167,39 @@ async def test_game_time_import_cached_entries(
         }
     )
 
-    new_backend_game_usage_responses = [
-        (10, 1451288960),  # same time, no update
-        (125, 1551288965),  # newer endtime, updated
-        (120, 1551288960),  # missing in new 'last_played' response
-        (5, 1551288965)  # previously missing
-    ]
-
     backend_client.get_offer.side_effect = BACKEND_OFFER_RESPONSES
-    backend_client.get_lastplayed_games.return_value = {
-        MASTER_TITLE_IDS[0]: new_backend_game_usage_responses[0][1],
-        MASTER_TITLE_IDS[1]: new_backend_game_usage_responses[1][1],
-        # MASTER_TITLE_IDS[2] previously existed, now missing
-        MASTER_TITLE_IDS[3]: new_backend_game_usage_responses[3][1]
-    }
-    backend_client.get_game_time.side_effect = new_backend_game_usage_responses[1:]  # updates only
+    backend_client.get_lastplayed_games.return_value = async_return_value(LASTPLAYED_GAMES)
+    backend_client.get_game_time.side_effect = NEW_BACKEND_GAME_USAGE_RESPONSES[1:]  # updates only
 
-    await authenticated_plugin.start_game_times_import(OFFER_IDS)
+    await authenticated_plugin.prepare_game_times_context(OFFER_IDS)
     # wait for all `get_game_time` requests to be called
     for i in range(3):
         await asyncio.sleep(0)
 
-    backend_client.get_entitlements.assert_not_called()
-    backend_client.get_lastplayed_games.assert_called_once_with(user_id)
     backend_client.get_offer.assert_has_calls([call(offer_id) for offer_id in OFFER_IDS], any_order=True)
+    backend_client.get_lastplayed_games.assert_called_once_with(user_id)
+
+    for offer_id, response in zip(OFFER_IDS, NEW_BACKEND_GAME_USAGE_RESPONSES):
+        assert GameTime(offer_id, *response) == await authenticated_plugin.get_game_time(offer_id, LASTPLAYED_GAMES)
+
+    backend_client.get_entitlements.assert_not_called()
     backend_client.get_game_time.assert_has_calls(
         [call(user_id, master_title_id, None) for master_title_id in MASTER_TITLE_IDS[1:]],
         any_order=True
     )
-    mock_game_time_import_success.assert_has_calls([
-        call(GameTime(offer_id, *response))
-        for offer_id, response in zip(OFFER_IDS, new_backend_game_usage_responses)
-    ], any_order=True)
 
 
 @pytest.mark.asyncio
-async def test_game_time_import_empty_cache(authenticated_plugin, backend_client, user_id,
-    mock_game_time_import_success):
-    backend_client.get_entitlements.return_value = BACKEND_ENTITLEMENTS_RESPONSE
-    backend_client.get_lastplayed_games.return_value = BACKEND_LASTPLAYED_PARSED
+async def test_game_time_import_empty_cache(
+    authenticated_plugin,
+    backend_client,
+    user_id
+):
+    backend_client.get_lastplayed_games.return_value = async_return_value(LASTPLAYED_GAMES)
     backend_client.get_offer.side_effect = BACKEND_OFFER_RESPONSES
     backend_client.get_game_time.side_effect = BACKEND_GAME_USAGE_RESPONSES
 
-    await authenticated_plugin.start_game_times_import(OFFER_IDS)
+    assert LASTPLAYED_GAMES == await authenticated_plugin.prepare_game_times_context(OFFER_IDS)
     # wait for all `get_game_time` requests to be called
     for i in range(3):
         await asyncio.sleep(0)
@@ -196,11 +207,14 @@ async def test_game_time_import_empty_cache(authenticated_plugin, backend_client
     backend_client.get_entitlements.assert_not_called()
     backend_client.get_lastplayed_games.assert_called_once_with(user_id)
     backend_client.get_offer.assert_has_calls([call(offer_id) for offer_id in OFFER_IDS], any_order=True)
+
+    for game_time in GAME_TIMES:
+        assert game_time == await authenticated_plugin.get_game_time(game_time.game_id, LASTPLAYED_GAMES)
+
     backend_client.get_game_time.assert_has_calls(
         [call(user_id, MASTER_TITLE_IDS[i], MULTIPLAYER_IDS[i]) for i in range(len(OFFER_IDS))],
         any_order=True
     )
-    mock_game_time_import_success.assert_has_calls([call(game_time) for game_time in GAME_TIMES], any_order=True)
 
 
 @pytest.mark.asyncio
@@ -234,4 +248,3 @@ async def test_game_time_cache_decoding(raw_game_time_cache, game_time_cache, pl
         "offers": {},
         "game_time": game_time_cache
     }
-

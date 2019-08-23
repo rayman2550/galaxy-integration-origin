@@ -1,23 +1,52 @@
 import pytest
-from backend import OriginBackendClient
 from galaxy.api.errors import AuthenticationRequired
 from galaxy.api.types import Achievement
-from unittest.mock import call
 
-OFFER_IDS_NO_ACH = {
-    "DR:119971300": None,
-    "OFB-EAST:109552409": None,
-    "OFB-EAST:48217": None
-}
-OFFER_IDS_ACH = {
-    "Origin.OFR.50.0001672": "50318_194188_50844",
-    "OFB-EAST:50885": "50563_52657_50844",
-    "DR:225064100": "BF_BF3_PC",
-    "Origin.OFR.50.0001452": "193634_192492_50844"
-}
-OFFER_IDS = dict(OFFER_IDS_NO_ACH, **OFFER_IDS_ACH)
+from backend import OriginBackendClient, ProductInfo
+from plugin import AchievementsImportContext
 
-ACHIEVEMENT_SETS_BACKEND_RESPONSE = {
+OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS = {
+    "DR:119971300": ProductInfo("DR:119971300", "Need For Speed™ Shift", "54856", None),
+    "OFB-EAST:109552409": ProductInfo("OFB-EAST:109552409", "The Sims™ 4", "55482", None),
+    "OFB-EAST:48217": ProductInfo("OFB-EAST:48217", "Plants vs. Zombies™ Game of the Year Edition", "180975", None),
+    "OFB-EAST:50885": ProductInfo("OFB-EAST:50885", "Dead Space™ 3", "52657", "50563_52657_50844"),
+    "Origin.OFR.50.0001672": ProductInfo("Origin.OFR.50.0001672", "THE WITCHER® 3: WILD HUNT", "192492", "50318_194188_50844"),
+    "Origin.OFR.50.0001452": ProductInfo("Origin.OFR.50.0001452", "Titanfall® 2", "192492", "193634_192492_50844")
+}
+
+OWNED_GAME_SPECIAL_ACHIEVEMENTS = {"DR:225064100": ProductInfo("DR:225064100", "Battlefield 3™", "50182", "BF_BF3_PC")}
+
+OWNED_GAMES = {**OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS, **OWNED_GAME_SPECIAL_ACHIEVEMENTS}
+
+ACHIEVEMENTS = {
+    "DR:119971300": [],
+    "OFB-EAST:109552409": [],
+    "OFB-EAST:48217": [],
+    "Origin.OFR.50.0001672": [],
+    "OFB-EAST:50885": [
+        Achievement(1376676315, "1", "Stranger in a Strange Land"),
+        Achievement(1376684053, "2", "Space Odyssey"),
+        Achievement(1377464844, "3", "Critical Mass"),
+        Achievement(1377467003, "4", "Snow Crash"),
+        Achievement(1383078508, "5", "Intestinal Fortitude"),
+        Achievement(1403554953, "31", "Full House"),
+        Achievement(1377897989, "34", "From the Jaws"),
+        Achievement(1377459297, "50", "Overpowered Healing")
+    ],
+    "DR:225064100": [
+        Achievement(1371064136, "XP2ACH02_00", "Man of Calibre"),
+        Achievement(1362857404, "ACH36_00", "M.I.A"),
+        Achievement(1371066037, "XP2ACH01_00", "Dominator"),
+        Achievement(1362857404, "ACH33_00", "Support Efficiency"),
+    ],
+    "Origin.OFR.50.0001452": [
+        Achievement(1480870347, "1", "The Student..."),
+        Achievement(1480870977, "3", "The Graduate"),
+        Achievement(1483373394, "50", "Free Association")
+    ]
+}
+
+MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_RESPONSE = {
     "50318_194188_50844": {
         "achievements": {},
         "name": "THE WITCHER® 3: WILD HUNT"
@@ -67,31 +96,6 @@ ACHIEVEMENT_SETS_BACKEND_RESPONSE = {
         },
         "name": "Dead Space™ 3"
     },
-    "BF_BF3_PC": {
-        "achievements": {
-            "XP2ACH02_00": {
-                "complete": True,
-                "u": 1371064136,
-                "name": "Man of Calibre",
-            },
-            "ACH36_00": {
-                "complete": True,
-                "u": 1362857404,
-                "name": "M.I.A",
-            },
-            "XP2ACH01_00": {
-                "complete": True,
-                "u": 1371066037,
-                "name": "Dominator",
-            },
-            "ACH33_00": {
-                "complete": True,
-                "u": 1362857404,
-                "name": "Support Efficiency",
-            }
-        },
-        "name": "Battlefield 3™"
-    },
     "193634_192492_50844": {
         "achievements": {
             "1": {
@@ -114,182 +118,96 @@ ACHIEVEMENT_SETS_BACKEND_RESPONSE = {
     }
 }
 
-ACHIEVEMENT_SETS_BACKEND_PARSED = {
-    "Origin.OFR.50.0001672": {},
-    "OFB-EAST:50885": {
-        "1": {
-            "complete": True,
-            "u": 1376676315,
-            "name": "Stranger in a Strange Land",
-        },
-        "2": {
-            "complete": True,
-            "u": 1376684053,
-            "name": "Space Odyssey",
-        },
-        "3": {
-            "complete": True,
-            "u": 1377464844,
-            "name": "Critical Mass",
-        },
-        "4": {
-            "complete": True,
-            "u": 1377467003,
-            "name": "Snow Crash",
-        },
-        "5": {
-            "complete": True,
-            "u": 1383078508,
-            "name": "Intestinal Fortitude",
-        },
-        "31": {
-            "complete": True,
-            "u": 1403554953,
-            "name": "Full House",
-        },
-        "34": {
-            "complete": True,
-            "u": 1377897989,
-            "name": "From the Jaws",
-        },
-        "50": {
-            "complete": True,
-            "u": 1377459297,
-            "name": "Overpowered Healing",
-        }
+MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_PARSED = {
+    "50318_194188_50844": ACHIEVEMENTS["Origin.OFR.50.0001672"],
+    "50563_52657_50844": ACHIEVEMENTS["OFB-EAST:50885"],
+    "193634_192492_50844": ACHIEVEMENTS["Origin.OFR.50.0001452"]
+}
+
+SINGLE_ACHIEVEMENTS_SET_BACKEND_RESPONSE = {
+    "XP2ACH02_00": {
+        "complete": True,
+        "u": 1371064136,
+        "name": "Man of Calibre",
     },
-    "DR:225064100": {
-        "XP2ACH02_00": {
-            "complete": True,
-            "u": 1371064136,
-            "name": "Man of Calibre",
-        },
-        "ACH36_00": {
-            "complete": True,
-            "u": 1362857404,
-            "name": "M.I.A",
-        },
-        "XP2ACH01_00": {
-            "complete": True,
-            "u": 1371066037,
-            "name": "Dominator",
-        },
-        "ACH33_00": {
-            "complete": True,
-            "u": 1362857404,
-            "name": "Support Efficiency",
-        }
+    "ACH36_00": {
+        "complete": True,
+        "u": 1362857404,
+        "name": "M.I.A",
     },
-    "Origin.OFR.50.0001452": {
-        "1": {
-            "complete": True,
-            "u": 1480870347,
-            "name": "The Student...",
-        },
-        "3": {
-            "complete": True,
-            "u": 1480870977,
-            "name": "The Graduate",
-        },
-        "50": {
-            "complete": True,
-            "u": 1483373394,
-            "name": "Free Association",
-        }
+    "XP2ACH01_00": {
+        "complete": True,
+        "u": 1371066037,
+        "name": "Dominator",
+    },
+    "ACH33_00": {
+        "complete": True,
+        "u": 1362857404,
+        "name": "Support Efficiency",
     }
 }
 
-ACHIEVEMENTS = {
-    "DR:119971300": [],
-    "OFB-EAST:109552409": [],
-    "OFB-EAST:48217": [],
-    "Origin.OFR.50.0001672": [],
-    "OFB-EAST:50885": [
-        Achievement(1376676315, "1", "Stranger in a Strange Land"),
-        Achievement(1376684053, "2", "Space Odyssey"),
-        Achievement(1377464844, "3", "Critical Mass"),
-        Achievement(1377467003, "4", "Snow Crash"),
-        Achievement(1383078508, "5", "Intestinal Fortitude"),
-        Achievement(1403554953, "31", "Full House"),
-        Achievement(1377897989, "34", "From the Jaws"),
-        Achievement(1377459297, "50", "Overpowered Healing")
-    ],
-    "DR:225064100": [
-        Achievement(1371064136, "XP2ACH02_00", "Man of Calibre"),
-        Achievement(1362857404, "ACH36_00", "M.I.A"),
-        Achievement(1371066037, "XP2ACH01_00", "Dominator"),
-        Achievement(1362857404, "ACH33_00", "Support Efficiency"),
-    ],
-    "Origin.OFR.50.0001452": [
-        Achievement(1480870347, "1", "The Student..."),
-        Achievement(1480870977, "3", "The Graduate"),
-        Achievement(1483373394, "50", "Free Association")
-    ]
+SINGLE_ACHIEVEMENTS_SET_BACKEND_PARSED = {
+    "BF_BF3_PC": ACHIEVEMENTS["DR:225064100"]
 }
 
-
-@pytest.fixture
-def mock_import_achievements_failure(mocker):
-    return mocker.patch("plugin.OriginPlugin.game_achievements_import_failure")
-
-
-@pytest.fixture
-def mock_import_achievements_success(mocker):
-    return mocker.patch("plugin.OriginPlugin.game_achievements_import_success")
-
-
 @pytest.mark.asyncio
-async def test_not_authenticated(plugin, http_client, mock_import_achievements_failure):
+async def test_not_authenticated(plugin, http_client):
     http_client.is_authenticated.return_value = False
 
     with pytest.raises(AuthenticationRequired):
-        await plugin.start_achievements_import(OFFER_IDS_NO_ACH.keys())
+        await plugin.prepare_achievements_context(OWNED_GAMES.keys())
 
 
 @pytest.mark.asyncio
-async def test_get_achievements(authenticated_plugin, persona_id, user_id, backend_client, mock_import_achievements_success):
-    backend_client.get_achievements.return_value = ACHIEVEMENT_SETS_BACKEND_PARSED
-    backend_client.get_achievements_sets.return_value = OFFER_IDS
+async def test_achievements_context_preparation(
+    authenticated_plugin,
+    user_id,
+    persona_id,
+    backend_client
+):
+    await authenticated_plugin.prepare_achievements_context(OWNED_GAMES.keys())
 
-    await authenticated_plugin.import_games_achievements(OFFER_IDS.keys())
-    backend_client.get_achievements_sets.assert_called_once_with(user_id)
-    backend_client.get_achievements.assert_called_once_with(persona_id, OFFER_IDS_ACH)
-
-    mock_import_achievements_success.assert_has_calls(
-        [call(offer_id, ACHIEVEMENTS[offer_id]) for offer_id in OFFER_IDS.keys()],
-        any_order=True
-    )
+    backend_client.get_owned_games.assert_called_once_with(user_id)
+    backend_client.get_achievements.assert_called_once_with(persona_id)
 
 
 @pytest.mark.asyncio
-async def test_get_explicit_achievements(persona_id, http_client, create_json_response):
-    explicit_offer_id = "explicit_offer_id"
-    explicit_set_id = "explicit_set_id"
-    explicit_set = {
-        "ACH00": {
-            "complete": True,
-            "u": 1564564308,
-            "name": "The Player",
-        }
-    }
-    http_client.get.side_effect = [
-        create_json_response(ACHIEVEMENT_SETS_BACKEND_RESPONSE),
-        create_json_response(explicit_set)
-    ]
+async def test_get_unlocked_achievements_simple(
+    authenticated_plugin,
+    backend_client,
+    user_id
+):
+    for game_id in OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS.keys():
+        assert ACHIEVEMENTS[game_id] == await authenticated_plugin.get_unlocked_achievements(
+            game_id,
+            context=AchievementsImportContext(
+                owned_games=OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS,
+                achievements=MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_PARSED
+            )
+        )
 
-    achievement_sets = dict(OFFER_IDS_ACH, **{explicit_offer_id: explicit_set_id})
+    backend_client.get_achievements.assert_not_called()
 
-    assert dict(ACHIEVEMENT_SETS_BACKEND_PARSED, **{explicit_offer_id: explicit_set}) == \
-        await OriginBackendClient(http_client).get_achievements(persona_id, achievement_sets)
 
-    http_client.get.assert_has_calls([
-        call("https://achievements.gameservices.ea.com/achievements/personas/{persona_id}/all".format(
-            persona_id=persona_id
-        ), params={'lang': 'en_US', 'metadata': 'true'}),
-        call("https://achievements.gameservices.ea.com/achievements/personas/{persona_id}/{set}/all".format(
-            persona_id=persona_id, set=explicit_set_id
-        ), params={'lang': 'en_US', 'metadata': 'true'})
-    ])
+@pytest.mark.asyncio
+async def test_get_unlocked_achievements_explicit_call(
+    authenticated_plugin,
+    backend_client,
+    persona_id
+):
+    backend_client.get_achievements.return_value = SINGLE_ACHIEVEMENTS_SET_BACKEND_PARSED
+
+    for game_id in OWNED_GAMES.keys():
+        assert ACHIEVEMENTS[game_id] == await authenticated_plugin.get_unlocked_achievements(
+            game_id,
+            context=AchievementsImportContext(
+                owned_games=OWNED_GAMES,
+                achievements=MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_PARSED
+            )
+        )
+
+    backend_client.get_achievements.assert_called_once_with(persona_id, "BF_BF3_PC")
 
 
 BACKEND_GAMES_RESPONSE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -360,9 +278,35 @@ BACKEND_GAMES_RESPONSE = """<?xml version="1.0" encoding="UTF-8" standalone="yes
 
 
 @pytest.mark.asyncio
-async def test_achievements_sets_parsing(persona_id, http_client, create_xml_response):
+async def test_owned_games_parsing(persona_id, http_client, create_xml_response):
     http_client.get.return_value = create_xml_response(BACKEND_GAMES_RESPONSE)
 
-    assert OFFER_IDS == await OriginBackendClient(http_client).get_achievements_sets(persona_id)
+    assert OWNED_GAMES == await OriginBackendClient(http_client).get_owned_games(persona_id)
 
     http_client.get.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_response, parsed, explicit_set", [
+    ({}, {}, None),
+    (MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_RESPONSE, MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_PARSED, None),
+    (SINGLE_ACHIEVEMENTS_SET_BACKEND_RESPONSE, SINGLE_ACHIEVEMENTS_SET_BACKEND_PARSED, "BF_BF3_PC"),
+])
+async def test_achievements_parsing(
+    backend_response,
+    parsed,
+    explicit_set,
+    http_client,
+    user_id,
+    create_json_response
+):
+    http_client.get.return_value = create_json_response(backend_response)
+
+    assert parsed == await OriginBackendClient(http_client).get_achievements(user_id, explicit_set)
+
+    http_client.get.assert_called_once_with(
+        "https://achievements.gameservices.ea.com/achievements/personas/{user_id}{specific_set}/all".format(
+            user_id=user_id, specific_set="/" + explicit_set if explicit_set else ""
+        ),
+        params={'lang': 'en_US', 'metadata': 'true'}
+    )

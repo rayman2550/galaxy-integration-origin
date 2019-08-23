@@ -6,18 +6,19 @@ import subprocess
 import sys
 import time
 import webbrowser
+from collections import namedtuple
 from functools import partial, wraps
-from typing import Callable, Dict, List, NewType, Optional
+from typing import Any, Callable, Dict, List, NewType, Optional
 
 from galaxy.api.consts import LicenseType, Platform
 from galaxy.api.errors import (
-    AccessDenied, ApplicationError, AuthenticationRequired, InvalidCredentials, UnknownBackendResponse, UnknownError
+    AccessDenied, AuthenticationRequired, InvalidCredentials, UnknownBackendResponse, UnknownError
 )
-from galaxy.api.plugin import Plugin, create_and_run_plugin
+from galaxy.api.plugin import create_and_run_plugin, Plugin
 from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep
 
 from backend import AuthenticatedHttpClient, MasterTitleId, OfferId, OriginBackendClient, Timestamp
-from local_games import LocalGames, get_local_content_path
+from local_games import get_local_content_path, LocalGames
 from uri_scheme_handler import is_uri_handler_installed
 from version import __version__
 
@@ -39,6 +40,7 @@ AUTH_PARAMS = {
 }
 
 MultiplayerId = NewType("MultiplayerId", str)
+AchievementsImportContext = namedtuple("AchievementsImportContext", ["owned_games", "achievements"])
 
 
 def using_cache(method):
@@ -59,7 +61,6 @@ class OriginPlugin(Plugin):
         super().__init__(Platform.Origin, __version__, reader, writer, token)
         self._user_id = None
         self._persona_id = None
-        self._last_played_games: Dict[MasterTitleId, Timestamp] = {}
 
         self._local_games = LocalGames(get_local_content_path())
         self._local_games_last_update = 0
@@ -135,52 +136,37 @@ class OriginPlugin(Plugin):
 
         return games
 
-    async def start_achievements_import(self, game_ids):
+    async def prepare_achievements_context(self, game_ids: List[str]) -> Any:
         self._check_authenticated()
 
-        await super().start_achievements_import(game_ids)
+        return AchievementsImportContext(
+            owned_games=await self._backend_client.get_owned_games(self._user_id),
+            achievements=await self._backend_client.get_achievements(self._persona_id)
+        )
 
-    async def import_games_achievements(self, _game_ids):
-        game_ids = set(_game_ids)
-        error = UnknownError("Not processed game")
+    async def get_unlocked_achievements(self, game_id: str, context: AchievementsImportContext) -> List[Achievement]:
         try:
-            achievement_sets: Dict[OfferId, str] = {}
-            for offer_id, achievement_set in (await self._backend_client.get_achievements_sets(self._user_id)).items():
-                if not achievement_set:
-                    self.game_achievements_import_success(offer_id, [])
-                    game_ids.remove(offer_id)
-                else:
-                    achievement_sets[offer_id] = achievement_set
+            achievements_set = context.owned_games[game_id].achievement_set
+        except (KeyError, AttributeError):
+            logging.exception("Game '{}' not found amongst owned".format(game_id))
+            raise UnknownBackendResponse
 
-            if not achievement_sets:
-                return
+        if not achievements_set:
+            return []
 
-            for offer_id, achievements in (await self._backend_client.get_achievements(
-                self._persona_id, achievement_sets
-            )).items():
-                try:
-                    self.game_achievements_import_success(offer_id, [
-                        Achievement(achievement_id=key, achievement_name=value["name"], unlock_time=value["u"])
-                        for key, value in achievements.items() if value["complete"]
-                    ])
-                except KeyError as e:
-                    self.game_achievements_import_failure(offer_id, UnknownBackendResponse(str(e)))
-                except ApplicationError as error:
-                    self.game_achievements_import_failure(offer_id, error)
-                except Exception as e:
-                    logging.exception("Unhandled exception. Please report it to the plugin developers")
-                    self.game_achievements_import_failure(offer_id, UnknownError(str(e)))
-                finally:
-                    game_ids.remove(offer_id)
-        except KeyError as e:
-            logging.exception("Failed to import achievements")
-            error = UnknownBackendResponse(str(e))
-        except ApplicationError as _error:
-            logging.exception("Failed to import achievements")
-            error = _error
-        finally:
-            # any other exceptions or not answered game_ids are responded with an error
-            [self.game_achievements_import_failure(game_id, error) for game_id in game_ids]
+        try:
+            # for some games(e.g.: ApexLegends) achievement set is not present in "all". have to fetch it explicitly
+            achievements = context.achievements.get(achievements_set)
+            if achievements is not None:
+                return achievements
+
+            return (await self._backend_client.get_achievements(
+                self._persona_id, achievements_set
+            ))[achievements_set]
+
+        except KeyError:
+            logging.exception("Failed to parse achievements for game {}".format(game_id))
+            raise UnknownBackendResponse
 
     @using_cache
     async def _get_offers(self, offer_ids):
@@ -301,47 +287,36 @@ class OriginPlugin(Plugin):
         self._persistent_cache_updated = True
         return game_time
 
-    async def start_game_times_import(self, game_ids):
+    async def prepare_game_times_context(self, game_ids: List[str]) -> Any:
         self._check_authenticated()
 
-        _, self._last_played_games = await asyncio.gather(
+        _, last_played_games = await asyncio.gather(
             self._get_offers(game_ids),  # update local cache ignoring return value
             self._backend_client.get_lastplayed_games(self._user_id)
         )
 
-        await super().start_game_times_import(game_ids)
+        return last_played_games
 
     @using_cache
-    async def import_game_times(self, game_ids: List[OfferId]):
-        async def import_game_time(offer_id: OfferId):
-            try:
-                offer = self._offer_id_cache.get(offer_id)
-                if offer is None:
-                    raise Exception("Internal cache out of sync")
-                master_title_id: MasterTitleId = offer["masterTitleId"]
-                multiplayer_id: Optional[MultiplayerId] = self._get_multiplayer_id(offer)
+    async def get_game_time(self, game_id: OfferId, last_played_games: Any) -> GameTime:
+        try:
+            offer = self._offer_id_cache.get(game_id)
+            if offer is None:
+                raise UnknownError("Internal cache out of sync")
 
-                self.game_time_import_success(
-                    await self._get_game_times_for_offer(
-                        offer_id,
-                        master_title_id,
-                        multiplayer_id,
-                        self._last_played_games.get(master_title_id)
-                    )
-                )
-            except KeyError as e:
-                logging.exception("Failed to import game times")
-                self.game_time_import_failure(offer_id, UnknownBackendResponse(str(e)))
-            except ApplicationError as error:
-                logging.exception("Failed to import game times")
-                self.game_time_import_failure(offer_id, error)
-            except Exception as e:
-                logging.exception("Failed to import game times")
-                logging.exception("Unhandled exception. Please report it to the plugin developers")
-                self.game_time_import_failure(offer_id, UnknownError(str(e)))
+            master_title_id: MasterTitleId = offer["masterTitleId"]
+            multiplayer_id: Optional[MultiplayerId] = self._get_multiplayer_id(offer)
 
-        await asyncio.gather(*[import_game_time(offer_id) for offer_id in game_ids])
-        self._last_played_games = None
+            return await self._get_game_times_for_offer(
+                game_id,
+                master_title_id,
+                multiplayer_id,
+                last_played_games.get(master_title_id)
+            )
+
+        except KeyError as e:
+            logging.exception("Failed to import game times")
+            raise UnknownBackendResponse(str(e))
 
     async def get_friends(self):
         self._check_authenticated()

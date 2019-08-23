@@ -66,9 +66,9 @@ def backend_client():
     mock.get_entitlements = AsyncMock()
     mock.get_game_time = AsyncMock()
     mock.get_achievements = AsyncMock()
-    mock.get_achievements_sets = AsyncMock()
+    mock.get_owned_games = AsyncMock()
     mock.get_friends = AsyncMock()
-    mock.get_lastplayed_games = AsyncMock()
+    mock.get_lastplayed_games = MagicMock()
 
     return mock
 
