@@ -70,7 +70,7 @@ BACKEND_GAME_USAGE_RESPONSES = [
     (10, 1451288960),
     (120, 1551288960),
     (120, 1551288960),
-    (0, 0)
+    (0, None)
 ]
 
 NEW_BACKEND_GAME_USAGE_RESPONSES = [
@@ -128,6 +128,25 @@ async def test_lastplayed_parsing(persona_id, http_client, create_xml_response):
     http_client.get.return_value = create_xml_response(BACKEND_LASTPLAYED_RESPONSE)
 
     assert BACKEND_LASTPLAYED_PARSED == await OriginBackendClient(http_client).get_lastplayed_games(persona_id)
+
+    http_client.get.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("total, last_played_time, game_time", [
+    ("<total>30292</total>", "<lastSessionEndTimeStamp>0</lastSessionEndTimeStamp>", (505, None)),
+    ("<total>59</total>", "", (1, None)),
+    ("<total>128</total>", "<lastSessionEndTimeStamp>1497190184759</lastSessionEndTimeStamp>", (2, 1497190185)),
+])
+async def test_game_time_parsing(total, last_played_time, game_time, persona_id, http_client, create_xml_response):
+    http_client.get.return_value = create_xml_response('''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <usage>
+            {total}
+            {last_played_time}
+        </usage>
+    '''.format(total=total, last_played_time=last_played_time))
+
+    assert game_time == await OriginBackendClient(http_client).get_game_time(persona_id, None, None)
 
     http_client.get.assert_called_once()
 
@@ -229,7 +248,7 @@ async def test_game_time_import_empty_cache(
         }''',
         {
             "DR:119971300": GameTime(game_id="DR:119971300", time_played=41, last_played_time=1551279330),
-            "OFB-EAST:109552409": GameTime(game_id="OFB-EAST:109552409", time_played=0, last_played_time=0),
+            "OFB-EAST:109552409": GameTime(game_id="OFB-EAST:109552409", time_played=0, last_played_time=None),
             "OFB-EAST:48217": GameTime(game_id="OFB-EAST:48217", time_played=116, last_played_time=1564660289),
             "Origin.OFR.0002694": GameTime(game_id="Origin.OFR.50.0002694", time_played=1, last_played_time=1555077603)
         }

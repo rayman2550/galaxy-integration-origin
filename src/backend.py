@@ -243,12 +243,16 @@ class OriginBackendClient:
         </usage>
         """
         try:
+            def parse_last_played_time(lastplayed_timestamp) -> Optional[int]:
+                if lastplayed_timestamp is None:
+                    return None
+                return round(int(lastplayed_timestamp.text) / 1000) or None  # response is in miliseconds
+
             content = await response.text()
             xml_response = ET.fromstring(content)
             total_play_time = round(int(xml_response.find("total").text) / 60)  # response is in seconds
-            last_session_end_time = round(
-                int(xml_response.find("lastSessionEndTimeStamp").text) / 1000)  # response is in miliseconds
-            return total_play_time, last_session_end_time
+
+            return total_play_time, parse_last_played_time(xml_response.find("lastSessionEndTimeStamp"))
         except (ET.ParseError, AttributeError, ValueError) as e:
             logging.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse(str(e))

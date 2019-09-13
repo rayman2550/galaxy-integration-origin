@@ -83,8 +83,8 @@ class OriginPlugin(Plugin):
     def _offer_id_cache(self):
         return self.persistent_cache.setdefault("offers", {})
 
-    def shutdown(self):
-        asyncio.create_task(self._http_client.close())
+    async def shutdown(self):
+        await self._http_client.close()
 
     def tick(self):
         self.handle_local_game_update_notifications()
@@ -362,8 +362,15 @@ class OriginPlugin(Plugin):
 
     def handshake_complete(self):
         def game_time_decoder(cache: Dict) -> Dict[OfferId, GameTime]:
+            def parse_last_played_time(entry):
+                # old cache might still contains 0 after plugin upgrade
+                lpt = entry.get("last_played_time")
+                if lpt == 0:
+                    return None
+                return lpt
+
             return {
-                offer_id: GameTime(entry["game_id"], entry["time_played"], entry["last_played_time"])
+                offer_id: GameTime(entry["game_id"], entry["time_played"], parse_last_played_time(entry))
                 for offer_id, entry in cache.items()
                 if entry and offer_id
             }
