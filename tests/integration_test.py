@@ -51,30 +51,22 @@ def test_integration():
         "jsonrpc": "2.0",
         "result": {
             "platform_name": "origin",
-            "token": token
+            "token": token,
+            "features": {
+                "ImportOwnedGames",
+                "ImportAchievements",
+                "ImportInstalledGames",
+                "LaunchGame",
+                "InstallGame",
+                "ShutdownPlatformClient",
+                "ImportFriends",
+                "ImportGameTime",
+            }
         }
     }
     if platform.system().lower() == "windows":
-        expected_response["result"]["features"] = {
-            "ImportOwnedGames",
-            "ImportAchievements",
-            "ImportInstalledGames",
-            "LaunchGame",
-            "InstallGame",
-            "UninstallGame",
-            "ImportFriends",
-            "ImportGameTime"
-        }
-    else:
-        expected_response["result"]["features"] = {
-            "ImportOwnedGames",
-            "ImportAchievements",
-            "ImportInstalledGames",
-            "LaunchGame",
-            "InstallGame",
-            "ImportFriends",
-            "ImportGameTime"
-        }
+        expected_response["result"]["features"].add("UninstallGame")
+
     assert response == expected_response, "Response differs from expected"
 
     plugin_socket.close()

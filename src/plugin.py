@@ -326,27 +326,25 @@ class OriginPlugin(Plugin):
             for user_id, user_name in (await self._backend_client.get_friends(self._user_id)).items()
         ]
 
-    @staticmethod
-    async def _open_uri(uri):
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, partial(webbrowser.open, uri))
-
     async def launch_game(self, game_id):
         if is_uri_handler_installed("origin2"):
-            await OriginPlugin._open_uri("origin2://game/launch?offerIds={}&autoDownload=true".format(game_id))
+            webbrowser.open("origin2://game/launch?offerIds={}&autoDownload=true".format(game_id))
         else:
-            await OriginPlugin._open_uri("https://www.origin.com/download")
+            webbrowser.open("https://www.origin.com/download")
 
     async def install_game(self, game_id):
         if is_uri_handler_installed("origin2"):
-            await OriginPlugin._open_uri("origin2://game/download?offerId={}".format(game_id))
+            webbrowser.open("origin2://game/download?offerId={}".format(game_id))
         else:
-            await OriginPlugin._open_uri("https://www.origin.com/download")
+            webbrowser.open("https://www.origin.com/download")
 
     if is_windows():
         async def uninstall_game(self, game_id):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, partial(subprocess.run, ["control", "appwiz.cpl"]))
+
+    async def shutdown_platform_client(self) -> None:
+        webbrowser.open("origin://quit")
 
     def _store_cookies(self, cookies):
         credentials = {
