@@ -7,7 +7,7 @@ import sys
 import time
 import webbrowser
 from collections import namedtuple
-from functools import partial, wraps
+from functools import partial
 from typing import Any, Callable, Dict, List, NewType, Optional
 
 from galaxy.api.consts import LicenseType, Platform
@@ -41,18 +41,6 @@ AUTH_PARAMS = {
 
 MultiplayerId = NewType("MultiplayerId", str)
 AchievementsImportContext = namedtuple("AchievementsImportContext", ["owned_games", "achievements"])
-
-
-def using_cache(method):
-    @wraps(method)
-    async def wrapper(self, *args, **kwargs):
-        result = await method(self, *args, **kwargs)
-        if self._persistent_cache_updated:
-            self.push_cache()
-            self._persistent_cache_updated = False
-        return result
-
-    return wrapper
 
 
 class OriginPlugin(Plugin):
@@ -168,7 +156,6 @@ class OriginPlugin(Plugin):
             logging.exception("Failed to parse achievements for game {}".format(game_id))
             raise UnknownBackendResponse
 
-    @using_cache
     async def _get_offers(self, offer_ids):
         """
             Get offers from cache if exists.
@@ -194,7 +181,7 @@ class OriginPlugin(Plugin):
                 offers.append(offer)
                 self._offer_id_cache[offer_id] = offer
 
-            self._persistent_cache_updated = True
+            self.push_cache()
 
         return offers
 
@@ -297,7 +284,6 @@ class OriginPlugin(Plugin):
 
         return last_played_games
 
-    @using_cache
     async def get_game_time(self, game_id: OfferId, last_played_games: Any) -> GameTime:
         try:
             offer = self._offer_id_cache.get(game_id)
@@ -317,6 +303,11 @@ class OriginPlugin(Plugin):
         except KeyError as e:
             logging.exception("Failed to import game times")
             raise UnknownBackendResponse(str(e))
+
+    def game_times_import_complete(self):
+        if self._persistent_cache_updated:
+            self.push_cache()
+            self._persistent_cache_updated = False
 
     async def get_friends(self):
         self._check_authenticated()
