@@ -15,13 +15,13 @@ from galaxy.api.errors import (
     AccessDenied, AuthenticationRequired, InvalidCredentials, UnknownBackendResponse, UnknownError
 )
 from galaxy.api.plugin import create_and_run_plugin, Plugin
-from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep
+from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep, GameLibrarySettings
 
 from backend import AuthenticatedHttpClient, MasterTitleId, OfferId, OriginBackendClient, Timestamp
 from local_games import get_local_content_path, LocalGames
 from uri_scheme_handler import is_uri_handler_installed
 from version import __version__
-
+import re
 
 def is_windows():
     return platform.system().lower() == "windows"
@@ -38,6 +38,14 @@ AUTH_PARAMS = {
                  "&redirect_uri=https://www.origin.com/views/login.html",
     "end_uri_regex": r"^https://www\.origin\.com/views/login\.html.*"
 }
+def regex_pattern(regex):
+    return ".*" + re.escape(regex) + ".*"
+
+JS = {regex_pattern(r"originX/login?execution"): [
+r'''
+    document.getElementById("rememberMe").click();
+'''
+]}
 
 MultiplayerId = NewType("MultiplayerId", str)
 AchievementsImportContext = namedtuple("AchievementsImportContext", ["owned_games", "achievements"])
@@ -97,7 +105,7 @@ class OriginPlugin(Plugin):
         stored_cookies = stored_credentials.get("cookies") if stored_credentials else None
 
         if not stored_cookies:
-            return NextStep("web_session", AUTH_PARAMS)
+            return NextStep("web_session", AUTH_PARAMS,js=JS)
 
         return await self._do_authenticate(stored_cookies)
 
@@ -111,7 +119,6 @@ class OriginPlugin(Plugin):
         self._check_authenticated()
 
         owned_offers = await self._get_owned_offers()
-
         games = []
         for offer in owned_offers:
             game = Game(
@@ -303,6 +310,26 @@ class OriginPlugin(Plugin):
         except KeyError as e:
             logging.exception("Failed to import game times")
             raise UnknownBackendResponse(str(e))
+
+    async def prepare_game_library_settings_context(self, game_ids: List[str]) -> Any:
+        self._check_authenticated()
+        hidden_games = await self._backend_client.get_hidden_games(self._user_id)
+        favorite_games = await self._backend_client.get_favorite_games(self._user_id)
+
+        library_context = {}
+        for game_id in game_ids:
+            library_context[game_id] = {'hidden': game_id in hidden_games, 'favorite': game_id in favorite_games}
+        return library_context
+
+    async def get_game_library_settings(self, game_id: str, context: Any) -> GameLibrarySettings:
+        if not context:
+            # Unable to retrieve context
+            return GameLibrarySettings(game_id, None, None)
+        game_library_settings = context.get(game_id)
+        if game_library_settings is None:
+            # Able to retrieve context but game is not in its values -> It doesnt have any tags or hidden status set
+            return GameLibrarySettings(game_id, [], False)
+        return GameLibrarySettings(game_id, ['favorite'] if game_library_settings['favorite'] else [], game_library_settings['hidden'])
 
     def game_times_import_complete(self):
         if self._persistent_cache_updated:

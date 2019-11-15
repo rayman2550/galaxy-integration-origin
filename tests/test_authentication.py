@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from galaxy.api.types import Authentication, NextStep
 
-from plugin import AUTH_PARAMS
+from plugin import AUTH_PARAMS, JS
 
 
 def test_no_stored_credentials(plugin, http_client, backend_client):
@@ -22,7 +22,7 @@ def test_no_stored_credentials(plugin, http_client, backend_client):
 
     with patch.object(plugin, "store_credentials") as store_credentials:
         result = loop.run_until_complete(plugin.authenticate())
-        assert result == NextStep("web_session", AUTH_PARAMS)
+        assert result == NextStep("web_session", AUTH_PARAMS, js=JS)
 
         credentials = {
             "cookies": cookies,

@@ -383,3 +383,65 @@ class OriginBackendClient:
         except (ET.ParseError, AttributeError, ValueError):
             logging.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse()
+
+    async def get_favorite_games(self, user_id):
+        response = await self._http_client.get("{base_api}/atom/users/{user_id}/privacySettings/FAVORITEGAMES".format(
+            base_api=self._get_api_host(),
+            user_id=user_id
+        ))
+
+        '''
+        <?xml version="1.0" encoding="UTF-8"?>
+        <privacySettings>
+           <privacySetting>
+              <userId>1008620950926</userId>
+              <category>FAVORITEGAMES</category>
+              <payload>OFB-EAST:48217;OFB-EAST:109552409;DR:119971300</payload>
+           </privacySetting>
+        </privacySettings>
+        '''
+
+        try:
+            content = await response.text()
+            payload_xml = ET.ElementTree(ET.fromstring(content)).find("privacySetting/payload")
+            if payload_xml is None or payload_xml.text is None:
+                # No games tagged, if on object evaluates to false
+                return []
+
+            favorite_games = set(payload_xml.text.split(';'))
+
+            return favorite_games
+        except (ET.ParseError, AttributeError, ValueError):
+            logging.exception("Can not parse backend response: %s", await response.text())
+            raise UnknownBackendResponse()
+
+    async def get_hidden_games(self, user_id):
+        response = await self._http_client.get("{base_api}/atom/users/{user_id}/privacySettings/HIDDENGAMES".format(
+            base_api=self._get_api_host(),
+            user_id=user_id
+        ))
+
+        '''
+        <?xml version="1.0" encoding="UTF-8"?>
+        <privacySettings>
+           <privacySetting>
+              <userId>1008620950926</userId>
+              <category>HIDDENGAMES</category>
+              <payload>1.0|OFB-EAST:109552409;OFB-EAST:109552409</payload>
+           </privacySetting>
+        </privacySettings>
+        '''
+
+        try:
+            content = await response.text()
+            payload_xml = ET.ElementTree(ET.fromstring(content)).find("privacySetting/payload")
+            if payload_xml is None or payload_xml.text is None:
+                # No games tagged, if on object evaluates to false
+                return []
+            payload_text = payload_xml.text.replace('1.0|', '')
+            hidden_games = set(payload_text.split(';'))
+
+            return hidden_games
+        except (ET.ParseError, AttributeError, ValueError):
+            logging.exception("Can not parse backend response: %s", await response.text())
+            raise UnknownBackendResponse()
