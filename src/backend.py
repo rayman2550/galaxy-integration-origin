@@ -108,8 +108,8 @@ class AuthenticatedHttpClient(HttpClient):
             data = await response.json(content_type=None)
             self._access_token = data["access_token"]
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse access token from backend response")
-            raise UnknownBackendResponse(str(e))
+            logging.exception("Can not parse access token from backend response %s", repr(e))
+            raise UnknownBackendResponse()
 
 
 class OriginBackendClient:
@@ -139,8 +139,8 @@ class OriginBackendClient:
 
             return str(user_id), str(persona_id), str(user_name)
         except (ET.ParseError, AttributeError) as e:
-            logging.exception("Can not parse backend response: %s", content)
-            raise UnknownBackendResponse(str(e))
+            logging.exception("Can not parse backend response: %s, error %s", content, repr(e))
+            raise UnknownBackendResponse()
 
     async def get_entitlements(self, user_id):
         url = "{}/ecommerce2/consolidatedentitlements/{}?machine_hash=1".format(
@@ -155,8 +155,8 @@ class OriginBackendClient:
             data = await response.json()
             return data["entitlements"]
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse backend response: %s", await response.text())
-            raise UnknownBackendResponse(str(e))
+            logging.exception("Can not parse backend response: %s, error %s", await response.text(), repr(e))
+            raise UnknownBackendResponse()
 
     async def get_offer(self, offer_id):
         url = "{}/ecommerce2/public/supercat/{}/{}".format(
@@ -168,8 +168,8 @@ class OriginBackendClient:
         try:
             return await response.json()
         except ValueError as e:
-            logging.exception("Can not parse backend response: %s", await response.text())
-            raise UnknownBackendResponse(str(e))
+            logging.exception("Can not parse backend response: %s, error %s", await response.text, repr(e))
+            raise UnknownBackendResponse()
 
     async def get_achievements(self, persona_id: str, achievement_set: str = None) \
             -> Dict[AchievementSet, List[Achievement]]:
@@ -214,8 +214,8 @@ class OriginBackendClient:
             }
 
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse achievements from backend response")
-            raise UnknownBackendResponse(str(e))
+            logging.exception("Can not parse achievements from backend response %s", repr(e))
+            raise UnknownBackendResponse()
 
     async def get_game_time(self, user_id, master_title_id, multiplayer_id):
         url = "{}/atom/users/{}/games/{}/usage".format(
@@ -254,8 +254,8 @@ class OriginBackendClient:
 
             return total_play_time, parse_last_played_time(xml_response.find("lastSessionEndTimeStamp"))
         except (ET.ParseError, AttributeError, ValueError) as e:
-            logging.exception("Can not parse backend response: %s", await response.text())
-            raise UnknownBackendResponse(str(e))
+            logging.exception("Can not parse backend response: %s, %s", await response.text(), repr(e))
+            raise UnknownBackendResponse()
 
     async def get_friends(self, user_id):
         response = await self._http_client.get(

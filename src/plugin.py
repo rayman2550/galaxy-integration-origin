@@ -88,7 +88,7 @@ class OriginPlugin(Plugin):
     def _check_authenticated(self):
         if not self._http_client.is_authenticated():
             logging.exception("Plugin not authenticated")
-            raise AuthenticationRequired("Plugin not authenticated")
+            raise AuthenticationRequired()
 
     async def _do_authenticate(self, cookies):
         try:
@@ -98,8 +98,8 @@ class OriginPlugin(Plugin):
             return Authentication(self._user_id, user_name)
 
         except (AccessDenied, InvalidCredentials) as e:
-            logging.exception("Failed to authenticate")
-            raise InvalidCredentials(str(e))
+            logging.exception("Failed to authenticate %s", repr(e))
+            raise InvalidCredentials()
 
     async def authenticate(self, stored_credentials=None):
         stored_cookies = stored_credentials.get("cookies") if stored_credentials else None
@@ -144,7 +144,7 @@ class OriginPlugin(Plugin):
             achievements_set = context.owned_games[game_id].achievement_set
         except (KeyError, AttributeError):
             logging.exception("Game '{}' not found amongst owned".format(game_id))
-            raise UnknownBackendResponse
+            raise UnknownBackendResponse()
 
         if not achievements_set:
             return []
@@ -161,7 +161,7 @@ class OriginPlugin(Plugin):
 
         except KeyError:
             logging.exception("Failed to parse achievements for game {}".format(game_id))
-            raise UnknownBackendResponse
+            raise UnknownBackendResponse()
 
     async def _get_offers(self, offer_ids):
         """
@@ -295,7 +295,8 @@ class OriginPlugin(Plugin):
         try:
             offer = self._offer_id_cache.get(game_id)
             if offer is None:
-                raise UnknownError("Internal cache out of sync")
+                logging.exception("Internal cache out of sync")
+                raise UnknownError()
 
             master_title_id: MasterTitleId = offer["masterTitleId"]
             multiplayer_id: Optional[MultiplayerId] = self._get_multiplayer_id(offer)
@@ -308,8 +309,8 @@ class OriginPlugin(Plugin):
             )
 
         except KeyError as e:
-            logging.exception("Failed to import game times")
-            raise UnknownBackendResponse(str(e))
+            logging.exception("Failed to import game times %s", repr(e))
+            raise UnknownBackendResponse()
 
     async def prepare_game_library_settings_context(self, game_ids: List[str]) -> Any:
         self._check_authenticated()
