@@ -180,10 +180,12 @@ class OriginPlugin(Plugin):
         # request for missing offers
         if missing_offers:
             requests = [self._backend_client.get_offer(offer_id) for offer_id in missing_offers]
-            new_offers = await asyncio.gather(*requests)
+            new_offers = await asyncio.gather(*requests, return_exceptions=True)
 
-            # update
             for offer in new_offers:
+                if isinstance(offer, Exception):
+                    logging.error(repr(offer))
+                    continue
                 offer_id = offer["offerId"]
                 offers.append(offer)
                 self._offer_id_cache[offer_id] = offer

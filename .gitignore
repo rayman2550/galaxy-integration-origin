@@ -1,12 +1,20 @@
+# virtualenv
+.venv/
+venv/
+
 # pytest
 __pycache__/
 .pytest_cache/
+.mypy_cache/
 
-# pyinsaller
+# build artifacts
 build/
 output/
 *.spec
+
+# editors
 .idea
+.vscode
 
 # game description cache
 cache.dat
