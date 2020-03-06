@@ -110,7 +110,7 @@ BACKEND_LASTPLAYED_RESPONSE = '''<?xml version="1.0" encoding="UTF-8" standalone
     </lastPlayed>
     <lastPlayed>
         <masterTitleId>''' + MASTER_TITLE_IDS[2] + '''</masterTitleId>
-        <timestamp>2019-02-27T14:55:30.135Z</timestamp>
+        <timestamp>2019-02-27T14:55:30Z</timestamp>
     </lastPlayed>
 </lastPlayedGames>
 '''  # intentionally missing MASTER_TITLE_IDS[3]

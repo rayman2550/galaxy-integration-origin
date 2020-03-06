@@ -1,4 +1,5 @@
 import logging
+import time
 import random
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -107,9 +108,25 @@ class AuthenticatedHttpClient(HttpClient):
         try:
             data = await response.json(content_type=None)
             self._access_token = data["access_token"]
-        except (ValueError, KeyError) as e:
-            logging.exception("Can not parse access token from backend response %s", repr(e))
-            raise UnknownBackendResponse()
+        except (TypeError, ValueError, KeyError) as e:
+            self._log_session_duration()
+            try:
+                if data.get("error") == 'login_required':
+                    raise AuthenticationRequired
+                else:
+                    raise UnknownBackendResponse(data)
+            except AttributeError:
+                logging.exception(f"Error parsing access token: {repr(e)}, data: {data}")
+                raise UnknownBackendResponse
+
+    def _log_session_duration(self):
+        try:
+            utag_main_cookie = next(filter(lambda c: c.key == 'utag_main', self._cookie_jar))
+            utag_main = {i.split(':')[0]: i.split(':')[1] for i in utag_main_cookie.value.split('$')}
+            seconds_ago = int(time.time()) - int(utag_main['_st'][:10])
+            logging.info('Session created %s hours ago', str(seconds_ago // 3600))
+        except Exception as e:
+            logging.warning('Failed to get session duration: %s', repr(e))
 
 
 class OriginBackendClient:
@@ -363,26 +380,32 @@ class OriginBackendClient:
             </lastPlayed>
         </lastPlayedGames>
         '''
+        def parse_title_id(product_info_xml) -> MasterTitleId:
+            return product_info_xml.find("masterTitleId").text
+
+        def parse_timestamp(product_info_xml) -> Timestamp:
+            formats = (
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%SZ"  # no microseconds
+            )
+            td = product_info_xml.find("timestamp").text
+            for date_format in formats:
+                try:
+                    time_delta = datetime.strptime(td, date_format) - datetime(1970, 1, 1)
+                except ValueError:
+                    continue
+                return Timestamp(int(time_delta.total_seconds()))
+            raise ValueError(f"time data '{td}' does not match known formats")
+
         try:
-            def parse_title_id(product_info_xml) -> MasterTitleId:
-                return product_info_xml.find("masterTitleId").text
-
-            def parse_timestamp(product_info_xml) -> Timestamp:
-                return Timestamp(int(
-                    (
-                        datetime.strptime(product_info_xml.find("timestamp").text, "%Y-%m-%dT%H:%M:%S.%fZ")
-                        - datetime(1970, 1, 1)
-                    ).total_seconds()
-                ))
-
             content = await response.text()
             return {
                 parse_title_id(product_info_xml): parse_timestamp(product_info_xml)
                 for product_info_xml in ET.ElementTree(ET.fromstring(content)).iter("lastPlayed")
             }
-        except (ET.ParseError, AttributeError, ValueError):
+        except (ET.ParseError, AttributeError, ValueError) as e:
             logging.exception("Can not parse backend response: %s", await response.text())
-            raise UnknownBackendResponse()
+            raise UnknownBackendResponse(e)
 
     async def get_favorite_games(self, user_id):
         response = await self._http_client.get("{base_api}/atom/users/{user_id}/privacySettings/FAVORITEGAMES".format(

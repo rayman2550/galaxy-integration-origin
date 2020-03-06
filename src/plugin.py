@@ -97,7 +97,7 @@ class OriginPlugin(Plugin):
             self._user_id, self._persona_id, user_name = await self._backend_client.get_identity()
             return Authentication(self._user_id, user_name)
 
-        except (AccessDenied, InvalidCredentials) as e:
+        except (AccessDenied, InvalidCredentials, AuthenticationRequired) as e:
             logging.exception("Failed to authenticate %s", repr(e))
             raise InvalidCredentials()
 
