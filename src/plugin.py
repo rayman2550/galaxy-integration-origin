@@ -408,6 +408,12 @@ class OriginPlugin(Plugin):
         for key, decoder in (("offers", lambda x: x), ("game_time", game_time_decoder)):
             self.persistent_cache[key] = safe_decode(self.persistent_cache.get(key), key, decoder)
 
+        self._http_client.load_lats_from_cache(self.persistent_cache.get('lats'))
+        self._http_client.set_save_lats_callback(self._save_lats)
+
+    def _save_lats(self, lats: int):
+        self.persistent_cache['lats'] = str(lats)
+        self.push_cache()
 
 def main():
     create_and_run_plugin(OriginPlugin, sys.argv)

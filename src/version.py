@@ -1,6 +1,10 @@
-__version__ = "0.34"
+__version__ = "0.34.1"
 
 __changelog__ = {
+    "0.34.1":
+    """
+        - add extended logging to find session expiration time mechanism
+    """,
     "0.34":
     """
         - fix rare bug while parsing game times (#16)

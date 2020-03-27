@@ -48,6 +48,8 @@ class AuthenticatedHttpClient(HttpClient):
         self._auth_lost_callback = None
         self._cookie_jar = CookieJar()
         self._access_token = None
+        self._last_access_token_success = None
+        self._save_lats_callback = None
         super().__init__(cookie_jar=self._cookie_jar)
 
     def set_auth_lost_callback(self, callback):
@@ -108,8 +110,9 @@ class AuthenticatedHttpClient(HttpClient):
         try:
             data = await response.json(content_type=None)
             self._access_token = data["access_token"]
+            self._log_session_details()
         except (TypeError, ValueError, KeyError) as e:
-            self._log_session_duration()
+            self._log_session_details()
             try:
                 if data.get("error") == 'login_required':
                     raise AuthenticationRequired
@@ -118,13 +121,32 @@ class AuthenticatedHttpClient(HttpClient):
             except AttributeError:
                 logging.exception(f"Error parsing access token: {repr(e)}, data: {data}")
                 raise UnknownBackendResponse
+        else:
+            self._save_lats()
 
-    def _log_session_duration(self):
+    # more logging for auth lost investigation
+
+    def _save_lats(self):
+        if self._save_lats_callback is not None:
+            self._last_access_token_success = int(time.time())
+            self._save_lats_callback(self._last_access_token_success)
+
+    def set_save_lats_callback(self, callback):
+        self._save_lats_callback = callback
+
+    def load_lats_from_cache(self, value: Optional[str]):
+        self._last_access_token_success = int(value) if value else None
+
+    def _log_session_details(self):
         try:
             utag_main_cookie = next(filter(lambda c: c.key == 'utag_main', self._cookie_jar))
             utag_main = {i.split(':')[0]: i.split(':')[1] for i in utag_main_cookie.value.split('$')}
-            seconds_ago = int(time.time()) - int(utag_main['_st'][:10])
-            logging.info('Session created %s hours ago', str(seconds_ago // 3600))
+            logging.info('now: %s st: %s ses_id: %s lats: %s',
+                str(int(time.time())),
+                utag_main['_st'][:10],
+                utag_main['ses_id'][:10],
+                str(self._last_access_token_success)
+            )
         except Exception as e:
             logging.warning('Failed to get session duration: %s', repr(e))
 

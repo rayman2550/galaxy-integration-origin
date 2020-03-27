@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from plugin import OriginPlugin
+from backend import AuthenticatedHttpClient
 from tests.async_mock import AsyncMock
 
 
@@ -31,7 +32,7 @@ def local_games_path(tmpdir):
 
 @pytest.fixture
 def http_client():
-    mock = MagicMock(spec=("set_auth_lost_callback", "set_cookies_updated_callback", "is_authenticated"))
+    mock = MagicMock(spec=AuthenticatedHttpClient)
     mock.authenticate = AsyncMock()
     mock.get = AsyncMock()
 
