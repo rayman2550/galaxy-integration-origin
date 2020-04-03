@@ -8,14 +8,14 @@ import time
 import webbrowser
 from collections import namedtuple
 from functools import partial
-from typing import Any, Callable, Dict, List, NewType, Optional
+from typing import Any, Callable, Dict, List, NewType, Optional, AsyncGenerator
 
 from galaxy.api.consts import LicenseType, Platform
 from galaxy.api.errors import (
     AccessDenied, AuthenticationRequired, InvalidCredentials, UnknownBackendResponse, UnknownError
 )
 from galaxy.api.plugin import create_and_run_plugin, Plugin
-from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep, GameLibrarySettings
+from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep, GameLibrarySettings, Subscription, SubscriptionGame
 
 from backend import AuthenticatedHttpClient, MasterTitleId, OfferId, OriginBackendClient, Timestamp
 from local_games import get_local_content_path, LocalGames
@@ -203,6 +203,30 @@ class OriginPlugin(Plugin):
         # check if we have offers in cache
         offer_ids = [entitlement["offerId"] for entitlement in entitlements]
         return await self._get_offers(offer_ids)
+
+    async def get_subscriptions(self) -> List[Subscription]:
+        self._check_authenticated()
+        return await self._backend_client.get_subscriptions(user_id=self._user_id)
+
+    async def prepare_subscription_games_context(self, subscription_names: List[str]) -> Any:
+        self._check_authenticated()
+        subscription_name_to_tier = {
+            'Origin Access Basic': 'standard',
+            'Origin Access Premier': 'premium'
+        }
+        subscriptions = {}
+        for sub_name in subscription_names:
+            try:
+                tier = subscription_name_to_tier[sub_name]
+            except KeyError:
+                logging.error(f"Assertion: 'Galaxy passed unknown subscription name {sub_name}. This should not happen!")
+                raise UnknownError(f'Unknown subscription name {sub_name}!')
+            subscriptions[sub_name] = await self._backend_client.get_games_in_subscription(tier)
+        return subscriptions
+
+    async def get_subscription_games(self, subscription_name: str, context: Any) -> AsyncGenerator[List[SubscriptionGame],None]:
+        if context and subscription_name:
+            yield context[subscription_name]
 
     async def get_local_games(self):
         if self._local_games_update_in_progress:

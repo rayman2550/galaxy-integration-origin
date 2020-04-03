@@ -56,6 +56,8 @@ def test_integration():
                 "ImportOwnedGames",
                 "ImportAchievements",
                 "ImportInstalledGames",
+                "ImportSubscriptions",
+                "ImportSubscriptionGames",
                 "ImportGameLibrarySettings",
                 "LaunchGame",
                 "InstallGame",

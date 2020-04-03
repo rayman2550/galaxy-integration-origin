@@ -72,7 +72,8 @@ def backend_client():
     mock.get_lastplayed_games = MagicMock()
     mock.get_hidden_games = AsyncMock()
     mock.get_favorite_games = AsyncMock()
-
+    mock.get_games_in_subscription = AsyncMock()
+    mock.get_subscriptions = AsyncMock()
     return mock
 
 

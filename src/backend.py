@@ -11,7 +11,7 @@ from galaxy.api.errors import (
     AccessDenied, AuthenticationRequired, BackendError, BackendNotAvailable, BackendTimeout, NetworkError,
     UnknownBackendResponse
 )
-from galaxy.api.types import Achievement
+from galaxy.api.types import Achievement, SubscriptionGame, Subscription
 from galaxy.http import HttpClient
 from yarl import URL
 
@@ -110,7 +110,6 @@ class AuthenticatedHttpClient(HttpClient):
         try:
             data = await response.json(content_type=None)
             self._access_token = data["access_token"]
-            self._log_session_details()
         except (TypeError, ValueError, KeyError) as e:
             self._log_session_details()
             try:
@@ -489,4 +488,66 @@ class OriginBackendClient:
             return hidden_games
         except (ET.ParseError, AttributeError, ValueError):
             logging.exception("Can not parse backend response: %s", await response.text())
+            raise UnknownBackendResponse()
+
+    async def _get_subscription_status(self, subscription_uri):
+        def parse_timestamp(timestamp: str) -> Timestamp:
+            return Timestamp(
+                int((datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S") - datetime(1970, 1, 1)).total_seconds()))
+
+        response = await self._http_client.get(subscription_uri)
+        try:
+            data = await response.json()
+            if data and data['Subscription']['status'].lower() == 'enabled':
+                return {'tier': data['Subscription']['subscriptionLevel'].lower(),
+                        'end_time': parse_timestamp(data['Subscription']['nextBillingDate'])}
+            else:
+                return None
+        except (ValueError, KeyError) as e:
+            logging.exception("Can not parse backend response while getting subs details: %s, error %s", await response.text(), repr(e))
+            raise UnknownBackendResponse()
+
+    async def _get_subscription_uri(self, user_id):
+        url = f"https://gateway.ea.com/proxy/subscription/pids/{user_id}/subscriptionsv2/groups/Origin Membership"
+        response = await self._http_client.get(url)
+        try:
+            data = await response.json()
+            if 'subscriptionUri' in data:
+                return f"https://gateway.ea.com/proxy/subscription/pids/{user_id}{data['subscriptionUri'][0]}"
+            else:
+                return None
+        except (ValueError, KeyError) as e:
+            logging.exception("Can not parse backend response while getting subs uri: %s, error %s", await response.text(), repr(e))
+            raise UnknownBackendResponse()
+
+    async def get_subscriptions(self, user_id) -> List[Subscription]:
+        subs = {'standard': Subscription(subscription_name='Origin Access Basic', owned=False),
+                'premium': Subscription(subscription_name='Origin Access Premier', owned=False)}
+
+        subscription_uri = await self._get_subscription_uri(user_id)
+        if subscription_uri:
+            sub_status = await self._get_subscription_status(subscription_uri)
+            logging.debug(f'sub_status: {sub_status}')
+            try:
+                if sub_status:
+                    subs[sub_status['tier']].owned = True
+                    subs[sub_status['tier']].end_time = sub_status['end_time']
+            except (ValueError, KeyError) as e:
+                logging.exception("Unknown subscription tier, error %s", repr(e))
+                raise UnknownBackendResponse()            
+        else:
+            logging.debug(f'no subscription active')
+        return [subs['standard'], subs['premium']]
+
+    async def get_games_in_subscription(self, tier):
+        url = f"https://api3.origin.com/ecommerce2/vaultInfo/Origin Membership/tiers/{tier}"
+        headers = {
+            "Accept": "application/vnd.origin.v3+json; x-cache/force-write"
+        }
+        response = await self._http_client.get(url, headers=headers)
+        try:
+            games = await response.json()
+            return [SubscriptionGame(game_title=game['displayName'], game_id=game['offerId']) for game in games['game']]
+        except (ValueError, KeyError) as e:
+            logging.exception("Can not parse backend response while getting subs games: %s, error %s", await response.text(), repr(e))
             raise UnknownBackendResponse()

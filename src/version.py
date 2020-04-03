@@ -1,6 +1,10 @@
-__version__ = "0.34.1"
+__version__ = "0.35"
 
 __changelog__ = {
+    "0.35":
+    """
+        - added support for subscriptions
+    """,
     "0.34.1":
     """
         - add extended logging to find session expiration time mechanism
