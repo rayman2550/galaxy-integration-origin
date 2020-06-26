@@ -1,7 +1,6 @@
 import pytest
 from galaxy.api.errors import AuthenticationRequired
 from galaxy.api.types import GameLibrarySettings
-from galaxy.unittest.mock import async_return_value
 
 GAME_IDS = ['DR:119971300', 'OFB-EAST:48217', 'OFB-EAST:109552409', 'Origin.OFR.50.0002694']
 
@@ -81,7 +80,7 @@ async def test_get_favorite_games(
         user_id,
         http_client,
 ):
-    http_client.get.return_value = async_return_value(BACKEND_FAVORITES_RESPONSE)
+    http_client.get.return_value = BACKEND_FAVORITES_RESPONSE
 
     assert FAVORITE_GAMES == await backend_client.get_favorite_games(user_id)
 
@@ -92,7 +91,7 @@ async def test_get_hidden_games(
         user_id,
         http_client,
 ):
-    http_client.get.return_value = async_return_value(BACKEND_HIDDEN_RESPONSE)
+    http_client.get.return_value = BACKEND_HIDDEN_RESPONSE
 
     assert HIDDEN_GAMES == await backend_client.get_hidden_games(user_id)
 

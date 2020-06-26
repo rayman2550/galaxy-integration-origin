@@ -1,4 +1,5 @@
 import asyncio
+import pathlib
 import json
 import logging
 import platform
@@ -15,10 +16,13 @@ from galaxy.api.errors import (
     AccessDenied, AuthenticationRequired, InvalidCredentials, UnknownBackendResponse, UnknownError
 )
 from galaxy.api.plugin import create_and_run_plugin, Plugin
-from galaxy.api.types import Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, NextStep, GameLibrarySettings, Subscription, SubscriptionGame
+from galaxy.api.types import (
+    Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo,
+    NextStep, GameLibrarySettings, Subscription, SubscriptionGame
+)
 
-from backend import AuthenticatedHttpClient, MasterTitleId, OfferId, OriginBackendClient, Timestamp
-from local_games import get_local_content_path, LocalGames
+from backend import AuthenticatedHttpClient, MasterTitleId, OfferId, OriginBackendClient, Timestamp, AchievementSet
+from local_games import get_local_content_path, LocalGames, parse_map_crc_for_total_size
 from uri_scheme_handler import is_uri_handler_installed
 from version import __version__
 import re
@@ -52,7 +56,6 @@ AchievementsImportContext = namedtuple("AchievementsImportContext", ["owned_game
 
 
 class OriginPlugin(Plugin):
-    # pylint: disable=abstract-method
     def __init__(self, reader, writer, token):
         super().__init__(Platform.Origin, __version__, reader, writer, token)
         self._user_id = None
@@ -131,18 +134,30 @@ class OriginPlugin(Plugin):
 
         return games
 
+    @staticmethod
+    def _get_achievement_set_override(offer) -> Optional[AchievementSet]:
+        potential_achievement_set = None
+        for achievement_set in offer["platforms"]:
+            potential_achievement_set = achievement_set["achievementSetOverride"]
+            if achievement_set["platform"] == "PCWIN":
+                return potential_achievement_set
+        return potential_achievement_set
+
     async def prepare_achievements_context(self, game_ids: List[str]) -> Any:
         self._check_authenticated()
-
+        owned_offers = await self._get_owned_offers()
+        achievement_sets: Dict[OfferId, AchievementSet] = dict()
+        for offer in owned_offers:
+            achievement_sets[offer["offerId"]] = self._get_achievement_set_override(offer)
         return AchievementsImportContext(
-            owned_games=await self._backend_client.get_owned_games(self._user_id),
+            owned_games=achievement_sets,
             achievements=await self._backend_client.get_achievements(self._persona_id)
         )
 
     async def get_unlocked_achievements(self, game_id: str, context: AchievementsImportContext) -> List[Achievement]:
         try:
-            achievements_set = context.owned_games[game_id].achievement_set
-        except (KeyError, AttributeError):
+            achievements_set = context.owned_games[game_id]
+        except KeyError:
             logging.exception("Game '{}' not found amongst owned".format(game_id))
             raise UnknownBackendResponse()
 
@@ -219,12 +234,12 @@ class OriginPlugin(Plugin):
             try:
                 tier = subscription_name_to_tier[sub_name]
             except KeyError:
-                logging.error(f"Assertion: 'Galaxy passed unknown subscription name {sub_name}. This should not happen!")
+                logging.error("Assertion: 'Galaxy passed unknown subscription name %s. This should not happen!", sub_name)
                 raise UnknownError(f'Unknown subscription name {sub_name}!')
             subscriptions[sub_name] = await self._backend_client.get_games_in_subscription(tier)
         return subscriptions
 
-    async def get_subscription_games(self, subscription_name: str, context: Any) -> AsyncGenerator[List[SubscriptionGame],None]:
+    async def get_subscription_games(self, subscription_name: str, context: Any) -> AsyncGenerator[List[SubscriptionGame], None]:
         if context and subscription_name:
             yield context[subscription_name]
 
@@ -266,6 +281,18 @@ class OriginPlugin(Plugin):
 
         loop = asyncio.get_running_loop()
         asyncio.create_task(notify_local_games_changed())
+
+    async def prepare_local_size_context(self, game_ids) -> Dict[str, pathlib.PurePath]:
+        game_id_crc_map = {}
+        for filepath, manifest in zip(self._local_games._manifests_stats.keys(), self._local_games._manifests):
+            game_id_crc_map[manifest.game_id] = pathlib.PurePath(filepath).parent / 'map.crc'
+        return game_id_crc_map
+
+    async def get_local_size(self, game_id, context: Dict[str, pathlib.PurePath]) -> Optional[int]:
+        try:
+            return parse_map_crc_for_total_size(context[game_id])
+        except (KeyError, FileNotFoundError) as e:
+            raise UnknownError(f"Manifest for game {game_id} is not found: {repr(e)} | context: {context}")
 
     @staticmethod
     def _get_multiplayer_id(offer) -> Optional[MultiplayerId]:

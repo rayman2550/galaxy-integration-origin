@@ -64,6 +64,7 @@ def test_integration():
                 "ShutdownPlatformClient",
                 "ImportFriends",
                 "ImportGameTime",
+                "ImportLocalSize"
             }
         }
     }

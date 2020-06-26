@@ -39,7 +39,7 @@ def test_bad_manifest_format(local_games_object, tmpdir):
 
 def test_installing(local_games_object, tmpdir):
     mfst_file = tmpdir.mkdir("GameName").join("gameid.mfst")
-    mfst_file.write("?currentstate=kInstalling&id=OFB-EAST%3a48217&previousstate=kPostTransfer")
+    mfst_file.write("?currentstate=kInstalling&id=OFB-EAST%3a48217&previousstate=kPostTransfer&ddinitialdownload=1")
 
     expected = [LocalGame("OFB-EAST:48217", LocalGameState.None_)]
 
@@ -101,7 +101,7 @@ def test_notify_removed(local_games_object, tmpdir):
 
 def test_notify_changed(local_games_object, tmpdir):
     mfst_file = tmpdir.mkdir("GameName1").join("gameid.mfst")
-    mfst_file.write("?currentstate=kInstalling&id=OFB-EAST%3a48217&previousstate=kPostTransfer")
+    mfst_file.write("?currentstate=kInstalling&id=OFB-EAST%3a48217&previousstate=kPostTransfer&ddinitialdownload=1")
 
     local_games_object.update()
     mfst_file.write("?currentstate=kReadyToStart&id=OFB-EAST%3a48217&previousstate=kCompleted")

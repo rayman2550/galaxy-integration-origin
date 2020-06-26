@@ -1,4 +1,6 @@
 import glob
+import re
+import functools
 import logging
 import os
 import platform
@@ -13,7 +15,7 @@ else:
     import psutil
 
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum, auto, Flag
 from typing import Iterator, Tuple
 
 from galaxy.api.errors import FailedParsingManifest
@@ -43,7 +45,7 @@ class _State(Enum):
     kDecrypting = auto()
     kReadyToInstall = auto()
     kPreInstall = auto()
-    kInstalling = auto()
+    kInstalling = auto()  # This status is used for games which are installing or updating
     kPostInstall = auto()
     kFetchLicense = auto()
     kCompleted = auto()
@@ -56,6 +58,13 @@ class _Manifest:
     prev_state: _State
     ddinstallalreadycompleted: str
     dipinstallpath: str
+    ddinitialdownload: str
+
+
+class OriginGameState(Flag):
+    None_ = 0
+    Installed = 1
+    Playable = 2
 
 
 def _parse_msft_file(filepath):
@@ -68,8 +77,9 @@ def _parse_msft_file(filepath):
     prev_state = _State[parsed_data.get("previousstate", _State.kInvalid.name)]
     ddinstallalreadycompleted = parsed_data.get("ddinstallalreadycompleted", "0")
     dipinstallpath = parsed_data.get("dipinstallpath", "")
+    ddinitialdownload = parsed_data.get("ddinitialdownload", "0")
 
-    return _Manifest(game_id, state, prev_state, ddinstallalreadycompleted, dipinstallpath)
+    return _Manifest(game_id, state, prev_state, ddinstallalreadycompleted, dipinstallpath, ddinitialdownload)
 
 
 def get_local_games_manifests(manifests_stats):
@@ -82,6 +92,14 @@ def get_local_games_manifests(manifests_stats):
             raise FailedParsingManifest({"file": filename, "exception": e})
 
     return manifests
+
+
+def parse_map_crc_for_total_size(filepath) -> int:
+    with open(filepath, 'r', encoding='utf-16-le') as f:
+        content = f.read()
+    pattern = r'size=(\d+)'
+    sizes = re.findall(pattern, content)
+    return functools.reduce(lambda a, b : a + int(b), sizes, 0)
 
 
 if platform.system() == "Windows":
@@ -154,6 +172,18 @@ else:
                 logging.exception("Failed to get information for PID=%s" % pid)
 
 
+def read_state(manifest : _Manifest) -> OriginGameState:
+    game_state = OriginGameState.None_
+    if manifest.state == _State.kReadyToStart and manifest.prev_state == _State.kCompleted:
+        game_state |= OriginGameState.Installed
+        game_state |= OriginGameState.Playable
+    if manifest.ddinstallalreadycompleted == "1" and manifest.state != _State.kPostInstall:
+        game_state |= OriginGameState.Playable
+    if manifest.state in (_State.kInstalling, _State.kInitializing, _State.kTransferring, _State.kEnqueued, _State.kPostInstall) and manifest.ddinitialdownload == "0":
+        game_state |= OriginGameState.Installed
+    return game_state
+
+
 def get_local_games_from_manifests(manifests):
     local_games = []
 
@@ -169,8 +199,9 @@ def get_local_games_from_manifests(manifests):
 
         state = LocalGameState.None_
 
-        if ((manifest.state == _State.kReadyToStart and manifest.prev_state == _State.kCompleted)
-            or manifest.ddinstallalreadycompleted == "1"):
+        game_state = read_state(manifest)
+        if OriginGameState.Installed in game_state \
+                or OriginGameState.Playable in game_state:
             state |= LocalGameState.Installed
 
         if manifest.dipinstallpath and is_game_running(manifest.dipinstallpath):

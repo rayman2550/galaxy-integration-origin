@@ -2,9 +2,8 @@ import logging
 import time
 import random
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, NewType, Optional, Tuple
+from typing import Dict, List, NewType, Optional
 
 import aiohttp
 from galaxy.api.errors import (
@@ -20,13 +19,6 @@ AchievementSet = NewType("AchievementSet", str)
 OfferId = NewType("OfferId", str)
 Timestamp = NewType("Timestamp", int)
 
-
-@dataclass
-class ProductInfo:
-    offer_id: OfferId
-    display_name: str
-    master_title_id: MasterTitleId
-    achievement_set: Optional[AchievementSet] = None
 
 
 class CookieJar(aiohttp.CookieJar):
@@ -330,61 +322,6 @@ class OriginBackendClient:
             logging.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse()
 
-    async def get_owned_games(self, user_id) -> Dict[OfferId, ProductInfo]:
-        response = await self._http_client.get("{base_api}/atom/users/{user_id}/other/{other_user_id}/games".format(
-            base_api=self._get_api_host(),
-            user_id=user_id,
-            other_user_id=user_id
-        ))
-
-        '''
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <productInfoList>
-            <productInfo>
-                <productId>OFB-EAST:109552153</productId>
-                <displayProductName>Battlefield 4™ (Trial)</displayProductName>
-                <cdnAssetRoot>http://static.cdn.ea.com/ebisu/u/f/products/1015365</cdnAssetRoot>
-                <imageServer>https://Eaassets-a.akamaihd.net/origin-com-store-final-assets-prod</imageServer>
-                <packArtSmall>/76889/63.0x89.0/1007968_SB_63x89_en_US_^_2013-11-13-18-04-11_e8670.jpg</packArtSmall>
-                <packArtMedium>/76889/142.0x200.0/1007968_MB_142x200_en_US_^_2013-11-13-18-04-08_2ff.jpg</packArtMedium>
-                <packArtLarge>/76889/231.0x326.0/1007968_LB_231x326_en_US_^_2013-11-13-18-04-04_18173.jpg</packArtLarge>
-                <softwareList>
-                    <software softwarePlatform="PCWIN">
-                        <achievementSetOverride>51302_76889_50844</achievementSetOverride>
-                    </software>
-                </softwareList>
-                <masterTitleId>76889</masterTitleId>
-                <gameDistributionSubType>Limited Trial</gameDistributionSubType>
-            </productInfo>
-        </productInfoList>
-        '''
-        try:
-            def parse_product(product_info_xml) -> Tuple[OfferId, ProductInfo]:
-                def get_tag(tag_name) -> str:
-                    return product_info_xml.find(tag_name).text
-
-                def parse_achievement_set():
-                    set_xml = product_info_xml.find(".//softwareList/*/achievementSetOverride")
-                    if set_xml is None:
-                        return None
-                    return set_xml.text
-
-                return OfferId(get_tag("productId")), ProductInfo(
-                    offer_id=OfferId(get_tag("productId")),
-                    display_name=get_tag("displayProductName"),
-                    master_title_id=MasterTitleId(get_tag("masterTitleId")),
-                    achievement_set=parse_achievement_set()
-                )
-
-            content = await response.text()
-            return dict(
-                parse_product(product_info_xml)
-                for product_info_xml in ET.ElementTree(ET.fromstring(content)).iter("productInfo")
-            )
-        except (ET.ParseError, AttributeError, ValueError):
-            logging.exception("Can not parse backend response: %s", await response.text())
-            raise UnknownBackendResponse()
-
     async def get_lastplayed_games(self, user_id) -> Dict[MasterTitleId, Timestamp]:
         response = await self._http_client.get("{base_api}/atom/users/{user_id}/games/lastplayed".format(
             base_api=self._get_api_host(),
@@ -534,9 +471,9 @@ class OriginBackendClient:
                     subs[sub_status['tier']].end_time = sub_status['end_time']
             except (ValueError, KeyError) as e:
                 logging.exception("Unknown subscription tier, error %s", repr(e))
-                raise UnknownBackendResponse()            
+                raise UnknownBackendResponse()
         else:
-            logging.debug(f'no subscription active')
+            logging.debug('no subscription active')
         return [subs['standard'], subs['premium']]
 
     async def get_games_in_subscription(self, tier):

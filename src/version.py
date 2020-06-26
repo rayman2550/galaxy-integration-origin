@@ -1,6 +1,12 @@
-__version__ = "0.35"
+__version__ = "0.36"
 
 __changelog__ = {
+    "0.36":
+    """
+        - better handle installation status of games
+        - fix error on retrieving achievements for some games
+        - added support for local sizes
+    """,
     "0.35":
     """
         - added support for subscriptions

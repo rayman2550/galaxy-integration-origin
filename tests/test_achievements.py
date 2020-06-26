@@ -2,21 +2,27 @@ import pytest
 from galaxy.api.errors import AuthenticationRequired
 from galaxy.api.types import Achievement
 
-from backend import OriginBackendClient, ProductInfo
+from backend import OriginBackendClient
 from plugin import AchievementsImportContext
 
-OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS = {
-    "DR:119971300": ProductInfo("DR:119971300", "Need For Speed™ Shift", "54856", None),
-    "OFB-EAST:109552409": ProductInfo("OFB-EAST:109552409", "The Sims™ 4", "55482", None),
-    "OFB-EAST:48217": ProductInfo("OFB-EAST:48217", "Plants vs. Zombies™ Game of the Year Edition", "180975", None),
-    "OFB-EAST:50885": ProductInfo("OFB-EAST:50885", "Dead Space™ 3", "52657", "50563_52657_50844"),
-    "Origin.OFR.50.0001672": ProductInfo("Origin.OFR.50.0001672", "THE WITCHER® 3: WILD HUNT", "192492", "50318_194188_50844"),
-    "Origin.OFR.50.0001452": ProductInfo("Origin.OFR.50.0001452", "Titanfall® 2", "192492", "193634_192492_50844")
+from tests.async_mock import AsyncMock
+
+SIMPLE_ACHIEVEMENTS_SETS ={
+    "DR:119971300": None,
+    "OFB-EAST:109552409": None,
+    "OFB-EAST:48217": None,
+    "OFB-EAST:50885": "50563_52657_50844",
+    "Origin.OFR.50.0001672": "50318_194188_50844",
+    "Origin.OFR.50.0001452": "193634_192492_50844"
 }
 
-OWNED_GAME_SPECIAL_ACHIEVEMENTS = {"DR:225064100": ProductInfo("DR:225064100", "Battlefield 3™", "50182", "BF_BF3_PC")}
+SPECIAL_ACHIEVEMENTS_SETS = {
+    "DR:225064100": "BF_BF3_PC"
+}
 
-OWNED_GAMES = {**OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS, **OWNED_GAME_SPECIAL_ACHIEVEMENTS}
+ACHIEVEMENT_SETS = {**SIMPLE_ACHIEVEMENTS_SETS, **SPECIAL_ACHIEVEMENTS_SETS}
+
+
 
 ACHIEVEMENTS = {
     "DR:119971300": [],
@@ -124,6 +130,11 @@ MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_PARSED = {
     "193634_192492_50844": ACHIEVEMENTS["Origin.OFR.50.0001452"]
 }
 
+SINGLE_ACHIEVEMENTS_SET_BACKEND_PARSED = {
+    "BF_BF3_PC": ACHIEVEMENTS["DR:225064100"]
+}
+
+
 SINGLE_ACHIEVEMENTS_SET_BACKEND_RESPONSE = {
     "XP2ACH02_00": {
         "complete": True,
@@ -147,16 +158,12 @@ SINGLE_ACHIEVEMENTS_SET_BACKEND_RESPONSE = {
     }
 }
 
-SINGLE_ACHIEVEMENTS_SET_BACKEND_PARSED = {
-    "BF_BF3_PC": ACHIEVEMENTS["DR:225064100"]
-}
-
 @pytest.mark.asyncio
 async def test_not_authenticated(plugin, http_client):
     http_client.is_authenticated.return_value = False
 
     with pytest.raises(AuthenticationRequired):
-        await plugin.prepare_achievements_context(OWNED_GAMES.keys())
+        await plugin.prepare_achievements_context(None)
 
 
 @pytest.mark.asyncio
@@ -166,9 +173,12 @@ async def test_achievements_context_preparation(
     persona_id,
     backend_client
 ):
-    await authenticated_plugin.prepare_achievements_context(OWNED_GAMES.keys())
+    authenticated_plugin._get_owned_offers = AsyncMock()
+    authenticated_plugin._get_owned_offers.return_value = []
+    await authenticated_plugin.prepare_achievements_context(None)
 
-    backend_client.get_owned_games.assert_called_once_with(user_id)
+
+    authenticated_plugin._get_owned_offers.assert_called_once_with()
     backend_client.get_achievements.assert_called_once_with(persona_id)
 
 
@@ -178,11 +188,11 @@ async def test_get_unlocked_achievements_simple(
     backend_client,
     user_id
 ):
-    for game_id in OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS.keys():
+    for game_id in SIMPLE_ACHIEVEMENTS_SETS.keys():
         assert ACHIEVEMENTS[game_id] == await authenticated_plugin.get_unlocked_achievements(
             game_id,
             context=AchievementsImportContext(
-                owned_games=OWNED_GAMES_SIMPLE_SIMPLE_ACHIEVEMENTS,
+                owned_games=SIMPLE_ACHIEVEMENTS_SETS,
                 achievements=MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_PARSED
             )
         )
@@ -198,93 +208,16 @@ async def test_get_unlocked_achievements_explicit_call(
 ):
     backend_client.get_achievements.return_value = SINGLE_ACHIEVEMENTS_SET_BACKEND_PARSED
 
-    for game_id in OWNED_GAMES.keys():
+    for game_id in ACHIEVEMENT_SETS.keys():
         assert ACHIEVEMENTS[game_id] == await authenticated_plugin.get_unlocked_achievements(
             game_id,
             context=AchievementsImportContext(
-                owned_games=OWNED_GAMES,
+                owned_games=ACHIEVEMENT_SETS,
                 achievements=MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_PARSED
             )
         )
 
     backend_client.get_achievements.assert_called_once_with(persona_id, "BF_BF3_PC")
-
-
-BACKEND_GAMES_RESPONSE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<productInfoList>
-    <productInfo>
-        <productId>OFB-EAST:48217</productId>
-        <displayProductName>Plants vs. Zombies™ Game of the Year Edition</displayProductName>
-        <masterTitleId>180975</masterTitleId>
-        <gameDistributionSubType>Normal Game</gameDistributionSubType>
-    </productInfo>
-    <productInfo>
-        <productId>DR:119971300</productId>
-        <displayProductName>Need For Speed™ Shift</displayProductName>
-        <masterTitleId>54856</masterTitleId>
-    </productInfo>
-    <productInfo>
-        <productId>OFB-EAST:109552409</productId>
-        <displayProductName>The Sims™ 4</displayProductName>
-        <masterTitleId>55482</masterTitleId>
-        <gameDistributionSubType>Normal Game</gameDistributionSubType>
-    </productInfo>
-    <productInfo>
-        <productId>DR:225064100</productId>
-        <displayProductName>Battlefield 3™</displayProductName>
-        <softwareList>
-            <software softwarePlatform="PCWIN">
-                <achievementSetOverride>BF_BF3_PC</achievementSetOverride>
-            </software>
-        </softwareList>
-        <masterTitleId>50182</masterTitleId>
-        <gameDistributionSubType>Normal Game</gameDistributionSubType>
-    </productInfo>
-    <productInfo>
-        <productId>OFB-EAST:50885</productId>
-        <displayProductName>Dead Space™ 3</displayProductName>
-        <softwareList>
-            <software softwarePlatform="PCWIN">
-                <achievementSetOverride>50563_52657_50844</achievementSetOverride>
-            </software>
-        </softwareList>
-        <masterTitleId>52657</masterTitleId>
-        <gameDistributionSubType>Normal Game</gameDistributionSubType>
-    </productInfo>
-    <productInfo>
-        <productId>Origin.OFR.50.0001452</productId>
-        <displayProductName>Titanfall® 2</displayProductName>
-        <softwareList>
-            <software softwarePlatform="PCWIN">
-                <achievementSetOverride>193634_192492_50844</achievementSetOverride>
-            </software>
-        </softwareList>
-        <masterTitleId>192492</masterTitleId>
-        <gameDistributionSubType>Normal Game</gameDistributionSubType>
-    </productInfo>
-    <productInfo>
-        <productId>Origin.OFR.50.0001672</productId>
-        <displayProductName>THE WITCHER® 3: WILD HUNT</displayProductName>
-        <softwareList>
-            <software softwarePlatform="PCMAC">
-                <achievementSetOverride>50318_194188_50844</achievementSetOverride>
-            </software>
-        </softwareList>
-        <masterTitleId>192492</masterTitleId>
-        <gameDistributionSubType>Normal Game</gameDistributionSubType>
-    </productInfo>
-</productInfoList>
-"""
-
-
-@pytest.mark.asyncio
-async def test_owned_games_parsing(persona_id, http_client, create_xml_response):
-    http_client.get.return_value = create_xml_response(BACKEND_GAMES_RESPONSE)
-
-    assert OWNED_GAMES == await OriginBackendClient(http_client).get_owned_games(persona_id)
-
-    http_client.get.assert_called_once()
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend_response, parsed, explicit_set", [
