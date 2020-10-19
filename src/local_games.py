@@ -244,7 +244,7 @@ def get_local_content_path():
     platform_id = platform.system()
 
     if platform_id == "Windows":
-        local_content_path = os.path.join(os.environ["ProgramData"], "Origin", "LocalContent")
+        local_content_path = os.path.join(os.environ.get("ProgramData", os.environ.get("SystemDrive", "C:") + "\ProgramData"), "Origin", "LocalContent")
     elif platform_id == "Darwin":
         local_content_path = os.path.join(os.sep, "Library", "Application Support", "Origin", "LocalContent")
     else:
