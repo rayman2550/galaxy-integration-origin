@@ -3,13 +3,13 @@ from galaxy.api.types import SubscriptionGame, Subscription
 from galaxy.api.errors import BackendError
 
 
-SUBSCRIPTION_OWNED_ID = 'Origin Access Premier'
-SUBSCRIPTIONS_NOT_OWNED = [Subscription(subscription_name='Origin Access Basic', owned=False, end_time=None),
-                          Subscription(subscription_name='Origin Access Premier', owned=False, end_time=None)]
-SUBSCRIPTIONS_OWNED = [Subscription(subscription_name='Origin Access Basic', owned=False, end_time=None),
-                      Subscription(subscription_name='Origin Access Premier', owned=True, end_time=1581331712)]
+SUBSCRIPTION_OWNED_ID = 'EA Play Pro'
+SUBSCRIPTIONS_NOT_OWNED = [Subscription(subscription_name='EA Play', owned=False, end_time=None),
+                          Subscription(subscription_name='EA Play Pro', owned=False, end_time=None)]
+SUBSCRIPTIONS_OWNED = [Subscription(subscription_name='EA Play', owned=False, end_time=None),
+                      Subscription(subscription_name='EA Play Pro', owned=True, end_time=1581331712)]
 
-SUBSCRIPTIONS_CONTEXT = {'Origin Access Premier': [
+SUBSCRIPTIONS_CONTEXT = {'EA Play Pro': [
     SubscriptionGame(game_title='Mass Effect 3 N7 Digital Deluxe Edition - PC - WW (Origin/3PDD)',
                      game_id='DR:230773600', start_time=None, end_time=None),
     SubscriptionGame(game_title='LEGRAND LEGACY: Tale of the Fatebounds - PC - WW - (Origin)',

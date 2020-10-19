@@ -1,6 +1,11 @@
-__version__ = "0.36"
+__version__ = "0.37"
 
 __changelog__ = {
+    "0.37":
+    """
+        - rename Origin Access [Premium] to EA Play [Pro]
+        - fix crash if ProgramData is undefined in Environmental variables (#23 by @NathanaelA)
+    """,
     "0.36":
     """
         - better handle installation status of games

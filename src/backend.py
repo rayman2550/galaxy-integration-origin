@@ -458,8 +458,8 @@ class OriginBackendClient:
             raise UnknownBackendResponse()
 
     async def get_subscriptions(self, user_id) -> List[Subscription]:
-        subs = {'standard': Subscription(subscription_name='Origin Access Basic', owned=False),
-                'premium': Subscription(subscription_name='Origin Access Premier', owned=False)}
+        subs = {'standard': Subscription(subscription_name='EA Play', owned=False),
+                'premium': Subscription(subscription_name='EA Play Pro', owned=False)}
 
         subscription_uri = await self._get_subscription_uri(user_id)
         if subscription_uri:

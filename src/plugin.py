@@ -226,8 +226,8 @@ class OriginPlugin(Plugin):
     async def prepare_subscription_games_context(self, subscription_names: List[str]) -> Any:
         self._check_authenticated()
         subscription_name_to_tier = {
-            'Origin Access Basic': 'standard',
-            'Origin Access Premier': 'premium'
+            'EA Play': 'standard',
+            'EA Play Pro': 'premium'
         }
         subscriptions = {}
         for sub_name in subscription_names:
