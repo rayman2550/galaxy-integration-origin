@@ -82,6 +82,10 @@ class OriginPlugin(Plugin):
     def _offer_id_cache(self):
         return self.persistent_cache.setdefault("offers", {})
 
+    @property
+    def _entitlement_cache(self):
+        return self.persistent_cache.setdefault("entitlements", {})
+
     async def shutdown(self):
         await self._http_client.close()
 
@@ -211,6 +215,9 @@ class OriginPlugin(Plugin):
 
     async def _get_owned_offers(self):
         entitlements = await self._backend_client.get_entitlements(self._user_id)
+
+        for entitlement in entitlements:
+            self._entitlement_cache[entitlement["offerId"]] = entitlement
 
         # filter
         entitlements = [x for x in entitlements if x["offerType"] == "basegame"]
@@ -400,6 +407,10 @@ class OriginPlugin(Plugin):
 
     async def launch_game(self, game_id):
         if is_uri_handler_installed("origin2"):
+            entitlement = self._entitlement_cache.get(game_id, None)
+            if entitlement is not None:
+                if 'externalType' in entitlement:
+                    game_id += '@' + entitlement['externalType'].lower()
             webbrowser.open("origin2://game/launch?offerIds={}&autoDownload=true".format(game_id))
         else:
             webbrowser.open("https://www.origin.com/download")
