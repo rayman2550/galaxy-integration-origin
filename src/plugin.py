@@ -217,7 +217,8 @@ class OriginPlugin(Plugin):
         entitlements = await self._backend_client.get_entitlements(self._user_id)
 
         for entitlement in entitlements:
-            self._entitlement_cache[entitlement["offerId"]] = entitlement
+            if entitlement['offerId'] not in self._entitlement_cache:
+                self._entitlement_cache[entitlement["offerId"]] = entitlement
 
         # filter
         entitlements = [x for x in entitlements if x["offerType"] == "basegame"]
@@ -467,7 +468,7 @@ class OriginPlugin(Plugin):
                 return {}
 
         # parse caches
-        for key, decoder in (("offers", lambda x: x), ("game_time", game_time_decoder)):
+        for key, decoder in (("offers", lambda x: x), ("game_time", game_time_decoder), ("entitlements", lambda x: x)):
             self.persistent_cache[key] = safe_decode(self.persistent_cache.get(key), key, decoder)
 
         self._http_client.load_lats_from_cache(self.persistent_cache.get('lats'))
