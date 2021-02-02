@@ -409,9 +409,8 @@ class OriginPlugin(Plugin):
     async def launch_game(self, game_id):
         if is_uri_handler_installed("origin2"):
             entitlement = self._entitlement_cache.get(game_id)
-            if entitlement is not None:
-                if 'externalType' in entitlement:
-                    game_id += '@' + entitlement['externalType'].lower()
+            if entitlement and 'externalType' in entitlement:
+                game_id += '@' + entitlement['externalType'].lower()
             webbrowser.open("origin2://game/launch?offerIds={}&autoDownload=true".format(game_id))
         else:
             webbrowser.open("https://www.origin.com/download")
