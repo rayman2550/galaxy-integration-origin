@@ -408,7 +408,7 @@ class OriginPlugin(Plugin):
 
     async def launch_game(self, game_id):
         if is_uri_handler_installed("origin2"):
-            entitlement = self._entitlement_cache.get(game_id, None)
+            entitlement = self._entitlement_cache.get(game_id)
             if entitlement is not None:
                 if 'externalType' in entitlement:
                     game_id += '@' + entitlement['externalType'].lower()
