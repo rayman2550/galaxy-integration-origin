@@ -242,7 +242,7 @@ async def test_game_time_import_empty_cache(
     (
         '''{
             "DR:119971300": {"game_id": "DR:119971300", "time_played": 41, "last_played_time": 1551279330},
-            "OFB-EAST:109552409": {"game_id": "OFB-EAST:109552409", "time_played": 0, "last_played_time": 0},
+            "OFB-EAST:109552409": {"game_id": "OFB-EAST:109552409", "time_played": 0},
             "OFB-EAST:48217": {"game_id": "OFB-EAST:48217", "time_played": 116, "last_played_time": 1564660289},
             "Origin.OFR.0002694": {"game_id": "Origin.OFR.50.0002694", "time_played": 1, "last_played_time": 1555077603}
         }''',
@@ -252,6 +252,18 @@ async def test_game_time_import_empty_cache(
             "OFB-EAST:48217": GameTime(game_id="OFB-EAST:48217", time_played=116, last_played_time=1564660289),
             "Origin.OFR.0002694": GameTime(game_id="Origin.OFR.50.0002694", time_played=1, last_played_time=1555077603)
         }
+    ),
+    pytest.param(
+        '''{
+            "DR:119971300" :{ "game_id" : "DR:119971300", "last_played_time" : 1579099613, "time_played" : 43},
+            "DR:224766400" :{ "game_id" : "DR:224766400", "time_played" : 0},
+            "DR:119971300@subscription" : {"game_id" : "DR:119971300@subscription", "last_played_time" : 1579099813, "time_played" : 44}
+        }''',
+        {
+            "DR:224766400": GameTime(game_id="DR:224766400", time_played=0, last_played_time=None),
+            "DR:119971300@subscription": GameTime(game_id="DR:119971300@subscription", time_played=44, last_played_time=1579099813),
+        },
+        id="removing old entires after offerId -> gameId migration"
     )
 ])
 async def test_game_time_cache_decoding(raw_game_time_cache, game_time_cache, plugin, mocker):
@@ -263,7 +275,44 @@ async def test_game_time_cache_decoding(raw_game_time_cache, game_time_cache, pl
     )
 
     plugin.handshake_complete()
-    assert persistent_cache_mock.return_value == {
-        "offers": {},
-        "game_time": game_time_cache
+    assert persistent_cache_mock.return_value["game_time"] == game_time_cache
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("game_id,", [
+    "OFR.1234",
+    "OFR.1234@subscription"
+])
+async def test_game_time_import(
+    authenticated_plugin,
+    backend_client,
+    game_id,
+    mocker
+):
+    offer_id = game_id.split('@')[0]
+    master_title_id = "12345"
+    backend_times_response = (10, 1451288960)
+    offer_cache = {
+        offer_id: {
+            "offerId": offer_id,
+            "masterTitleId": master_title_id,
+            "platforms": [
+                {
+                    "platform": "PCWIN",
+                    "multiPlayerId": None
+                }
+            ],
+        }
     }
+    context = {master_title_id: backend_times_response[1]}
+    expected = GameTime(game_id, *backend_times_response)
+
+    mocker.patch.object(
+        type(authenticated_plugin),
+        "persistent_cache",
+        new_callable=mocker.PropertyMock,
+        return_value={"offers": offer_cache}
+    )
+    backend_client.get_game_time.return_value = backend_times_response
+
+    assert expected == await authenticated_plugin.get_game_time(game_id, context)

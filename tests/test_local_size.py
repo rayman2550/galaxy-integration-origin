@@ -45,12 +45,15 @@ async def test_plugin_local_size_game_not_installed(plugin):
 
 
 @pytest.mark.asyncio
-async def test_plugin_local_size_game_installed(tmpdir, plugin):
+@pytest.mark.parametrize('game_id_raw, game_id', [
+    pytest.param("OFB-EAST%3a48217", "OFB-EAST:48217", id="origin offer id"),
+    pytest.param("OFB-EAST%3a48217%40epic", "OFB-EAST:48217@epic", id="id with external type"),
+])
+async def test_plugin_local_size_game_installed(tmpdir, plugin, game_id_raw, game_id):
     expected_size = 142342
-    game_id = 'OFB-EAST:48217'
     local_content_dir = tmpdir.mkdir("GameName1")
     mfst_file = local_content_dir.join("Origin.gameId.mfst")
-    mfst_file.write("?currentstate=kReadyToStart&id=OFB-EAST%3a48217&previousstate=kCompleted")
+    mfst_file.write(f"?currentstate=kReadyToStart&id={game_id_raw}&previousstate=kCompleted")
     crc_file = local_content_dir.join("map.crc")
     crc_file.write_text(
         f'?crc=3156175984&file=game.exe&id=aeae3e851c66&jobid=%7b1b69c729-23b7-415f-a252-8f9cd9387475%7d&size={expected_size}',

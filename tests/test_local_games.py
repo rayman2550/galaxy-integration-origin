@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-from galaxy.api.errors import FailedParsingManifest
 from galaxy.api.types import LocalGame, LocalGameState
 
 from local_games import LocalGames, get_state_changes
@@ -32,16 +31,47 @@ def test_empty(local_games_object):
 def test_bad_manifest_format(local_games_object, tmpdir):
     mfst_file = tmpdir.mkdir("GameName").join("gameid.mfst")
     mfst_file.write("?currentstate=kInstalling&previousstate=kPostTransfer")
+    local_games, _ = local_games_object.update()
+    assert local_games == []
 
-    with pytest.raises(FailedParsingManifest):
-        _, _ = local_games_object.update()
+
+@pytest.mark.parametrize('invalid_manifest_content', [
+    "?currentstate=kInstalling&previousstate=kPostTransfer",
+    "?currentstate=UNKNOWN_STATE&previousstate=kPostTransfer&id=some_id",
+    "?currentstate=kInstalling&previousstate=UNKNOWN_STATE&id=some_id",
+    "?currentstate=UNKNOWN_STATE&previousstate=UNKNOWN_STATE&id=some_id",
+    "?currentstate=&previousstate=UNKNOWN_STATE&id=some_id",
+    "?currentstate=UNKNOWN_STATE&previousstate=&id=some_id",
+    "?currentstate=&previousstate=&id=some_id",
+    "INVALID_CONTENT",
+    b'\0',
+    "",
+])
+def test_valid_and_invalid_manifest_format(local_games_object, tmpdir, invalid_manifest_content):
+    """Invalid manifest file shouldn't break parsing rest of manifest files."""
+
+    TEST_GAME_ID = 'test_id'
+    game_dir = tmpdir.mkdir("GameName")
+    valid_mfst_file, invalid_mfst_file = game_dir.join("valid.mfst"), game_dir.join("invalid.mfst")
+    invalid_mfst_file.write(invalid_manifest_content)
+    valid_mfst_file.write("?currentstate=kInstalling&previousstate=kPostTransfer&id=" + TEST_GAME_ID)
+
+    local_games, _ = local_games_object.update()
+
+    assert len(local_games) == 1
+    assert local_games[0].game_id == TEST_GAME_ID
 
 
-def test_installing(local_games_object, tmpdir):
+
+@pytest.mark.parametrize("game_id_raw, game_id_expected", [
+    pytest.param("OFB-EAST%3a48217", "OFB-EAST:48217", id="origin offer id"),
+    pytest.param("OFB-EAST%3a48217%40epic", "OFB-EAST:48217@epic", id="id with external type"),
+])
+def test_installing(local_games_object, tmpdir, game_id_raw, game_id_expected):
     mfst_file = tmpdir.mkdir("GameName").join("gameid.mfst")
-    mfst_file.write("?currentstate=kInstalling&id=OFB-EAST%3a48217&previousstate=kPostTransfer&ddinitialdownload=1")
+    mfst_file.write(f"?currentstate=kInstalling&id={game_id_raw}&previousstate=kPostTransfer&ddinitialdownload=1")
 
-    expected = [LocalGame("OFB-EAST:48217", LocalGameState.None_)]
+    expected = [LocalGame(game_id_expected, LocalGameState.None_)]
 
     games, changed = local_games_object.update()
     assert games == expected

@@ -7,25 +7,28 @@ import subprocess
 import sys
 import time
 import webbrowser
-from collections import namedtuple
 from functools import partial
-from typing import Any, Callable, Dict, List, NewType, Optional, AsyncGenerator
+from typing import Any, Callable, Dict, List, NewType, Optional, AsyncGenerator, NamedTuple, Set, Iterable
 
 from galaxy.api.consts import LicenseType, Platform
 from galaxy.api.errors import (
-    AccessDenied, AuthenticationRequired, InvalidCredentials, UnknownBackendResponse, UnknownError
+    AccessDenied, AuthenticationRequired, BackendError, InvalidCredentials, UnknownBackendResponse, UnknownError
 )
 from galaxy.api.plugin import create_and_run_plugin, Plugin
 from galaxy.api.types import (
-    Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo,
+    Achievement, Authentication, FriendInfo, Game, GameTime, LicenseInfo, LocalGame,
     NextStep, GameLibrarySettings, Subscription, SubscriptionGame
 )
 
-from backend import AuthenticatedHttpClient, MasterTitleId, OfferId, OriginBackendClient, Timestamp, AchievementSet
+from backend import AuthenticatedHttpClient, MasterTitleId, OfferId, OriginBackendClient, Timestamp, AchievementSet, Json
 from local_games import get_local_content_path, LocalGames, parse_map_crc_for_total_size
 from uri_scheme_handler import is_uri_handler_installed
 from version import __version__
 import re
+
+
+logger = logging.getLogger(__name__)
+
 
 def is_windows():
     return platform.system().lower() == "windows"
@@ -52,7 +55,17 @@ r'''
 ]}
 
 MultiplayerId = NewType("MultiplayerId", str)
-AchievementsImportContext = namedtuple("AchievementsImportContext", ["owned_games", "achievements"])
+GameId = NewType("GameId", str)  # eg. Origin.OFR:12345 or Origin.OFR:12345@epic
+
+
+class AchievementsImportContext(NamedTuple):
+    owned_games: Dict[GameId, AchievementSet]
+    achievements: Dict[AchievementSet, List[Achievement]]
+
+
+class GameLibrarySettingsContext(NamedTuple):
+    favorite: Set[OfferId]
+    hidden: Set[OfferId]
 
 
 class OriginPlugin(Plugin):
@@ -79,12 +92,8 @@ class OriginPlugin(Plugin):
         return self.persistent_cache.setdefault("game_time", {})
 
     @property
-    def _offer_id_cache(self):
+    def _offer_id_cache(self) -> Dict[OfferId, Json]:
         return self.persistent_cache.setdefault("offers", {})
-
-    @property
-    def _entitlement_cache(self):
-        return self.persistent_cache.setdefault("entitlements", {})
 
     async def shutdown(self):
         await self._http_client.close()
@@ -94,7 +103,7 @@ class OriginPlugin(Plugin):
 
     def _check_authenticated(self):
         if not self._http_client.is_authenticated():
-            logging.exception("Plugin not authenticated")
+            logger.exception("Plugin not authenticated")
             raise AuthenticationRequired()
 
     async def _do_authenticate(self, cookies):
@@ -105,14 +114,14 @@ class OriginPlugin(Plugin):
             return Authentication(self._user_id, user_name)
 
         except (AccessDenied, InvalidCredentials, AuthenticationRequired) as e:
-            logging.exception("Failed to authenticate %s", repr(e))
+            logger.exception("Failed to authenticate %s", repr(e))
             raise InvalidCredentials()
 
     async def authenticate(self, stored_credentials=None):
         stored_cookies = stored_credentials.get("cookies") if stored_credentials else None
 
         if not stored_cookies:
-            return NextStep("web_session", AUTH_PARAMS,js=JS)
+            return NextStep("web_session", AUTH_PARAMS, js=JS)
 
         return await self._do_authenticate(stored_cookies)
 
@@ -122,14 +131,18 @@ class OriginPlugin(Plugin):
         self._store_cookies(new_cookies)
         return auth_info
 
-    async def get_owned_games(self):
+    @staticmethod
+    def _offer_id_from_game_id(game_id: GameId) -> OfferId:
+        return OfferId(game_id.split('@')[0])
+
+    async def get_owned_games(self) -> List[Game]:
         self._check_authenticated()
 
         owned_offers = await self._get_owned_offers()
         games = []
-        for offer in owned_offers:
+        for game_id, offer in owned_offers.items():
             game = Game(
-                offer["offerId"],
+                game_id,
                 offer["i18n"]["displayName"],
                 None,
                 LicenseInfo(LicenseType.SinglePurchase, None)
@@ -139,7 +152,7 @@ class OriginPlugin(Plugin):
         return games
 
     @staticmethod
-    def _get_achievement_set_override(offer) -> Optional[AchievementSet]:
+    def _get_achievement_set_override(offer: Json) -> Optional[AchievementSet]:
         potential_achievement_set = None
         for achievement_set in offer["platforms"]:
             potential_achievement_set = achievement_set["achievementSetOverride"]
@@ -147,22 +160,22 @@ class OriginPlugin(Plugin):
                 return potential_achievement_set
         return potential_achievement_set
 
-    async def prepare_achievements_context(self, game_ids: List[str]) -> Any:
+    async def prepare_achievements_context(self, game_ids: List[GameId]) -> AchievementsImportContext:
         self._check_authenticated()
-        owned_offers = await self._get_owned_offers()
+        owned_offers: Dict[GameId, Json] = await self._get_owned_offers()
         achievement_sets: Dict[OfferId, AchievementSet] = dict()
-        for offer in owned_offers:
-            achievement_sets[offer["offerId"]] = self._get_achievement_set_override(offer)
+        for game_id, offer in owned_offers.items():
+            achievement_sets[game_id] = self._get_achievement_set_override(offer)
         return AchievementsImportContext(
             owned_games=achievement_sets,
             achievements=await self._backend_client.get_achievements(self._persona_id)
         )
 
-    async def get_unlocked_achievements(self, game_id: str, context: AchievementsImportContext) -> List[Achievement]:
+    async def get_unlocked_achievements(self, game_id: GameId, context: AchievementsImportContext) -> List[Achievement]:
         try:
             achievements_set = context.owned_games[game_id]
         except KeyError:
-            logging.exception("Game '{}' not found amongst owned".format(game_id))
+            logger.exception("Game '{}' not found amongst owned".format(game_id))
             raise UnknownBackendResponse()
 
         if not achievements_set:
@@ -179,20 +192,20 @@ class OriginPlugin(Plugin):
             ))[achievements_set]
 
         except KeyError:
-            logging.exception("Failed to parse achievements for game {}".format(game_id))
+            logger.exception("Failed to parse achievements for game {}".format(game_id))
             raise UnknownBackendResponse()
 
-    async def _get_offers(self, offer_ids):
+    async def _get_offers(self, offer_ids: Iterable[OfferId]) -> Dict[OfferId, Json]:
         """
             Get offers from cache if exists.
             Fetch from backend if not and update cache.
         """
-        offers = []
+        offers = {}
         missing_offers = []
         for offer_id in offer_ids:
             offer = self._offer_id_cache.get(offer_id, None)
             if offer is not None:
-                offers.append(offer)
+                offers[offer_id] = offer
             else:
                 missing_offers.append(offer_id)
 
@@ -203,29 +216,31 @@ class OriginPlugin(Plugin):
 
             for offer in new_offers:
                 if isinstance(offer, Exception):
-                    logging.error(repr(offer))
+                    logger.error(repr(offer))
                     continue
                 offer_id = offer["offerId"]
-                offers.append(offer)
+                offers[offer_id] = offer
                 self._offer_id_cache[offer_id] = offer
 
             self.push_cache()
 
         return offers
+    
+    async def _get_owned_offers(self) -> Dict[GameId, Json]:
+        def get_game_id(entitlement: Json) -> GameId:
+            offer_id = entitlement["offerId"]
+            external_type = entitlement.get("externalType")
+            return GameId(f"{offer_id}@{external_type.lower()}" if external_type else offer_id)
 
-    async def _get_owned_offers(self):
         entitlements = await self._backend_client.get_entitlements(self._user_id)
+        basegame_entitlements = [x for x in entitlements if x["offerType"] == "basegame"]
+        basegame_offers = await self._get_offers([x["offerId"] for x in basegame_entitlements])
 
-        for entitlement in entitlements:
-            if entitlement['offerId'] not in self._entitlement_cache:
-                self._entitlement_cache[entitlement["offerId"]] = entitlement
-
-        # filter
-        entitlements = [x for x in entitlements if x["offerType"] == "basegame"]
-
-        # check if we have offers in cache
-        offer_ids = [entitlement["offerId"] for entitlement in entitlements]
-        return await self._get_offers(offer_ids)
+        return {
+            get_game_id(ent): basegame_offers[ent["offerId"]]
+            for ent in basegame_entitlements
+            if ent["offerId"] in basegame_offers
+        }
 
     async def get_subscriptions(self) -> List[Subscription]:
         self._check_authenticated()
@@ -233,27 +248,22 @@ class OriginPlugin(Plugin):
 
     async def prepare_subscription_games_context(self, subscription_names: List[str]) -> Any:
         self._check_authenticated()
-        subscription_name_to_tier = {
+        return {
             'EA Play': 'standard',
             'EA Play Pro': 'premium'
         }
-        subscriptions = {}
-        for sub_name in subscription_names:
-            try:
-                tier = subscription_name_to_tier[sub_name]
-            except KeyError:
-                logging.error("Assertion: 'Galaxy passed unknown subscription name %s. This should not happen!", sub_name)
-                raise UnknownError(f'Unknown subscription name {sub_name}!')
-            subscriptions[sub_name] = await self._backend_client.get_games_in_subscription(tier)
-        return subscriptions
 
-    async def get_subscription_games(self, subscription_name: str, context: Any) -> AsyncGenerator[List[SubscriptionGame], None]:
-        if context and subscription_name:
-            yield context[subscription_name]
+    async def get_subscription_games(self, subscription_name: str, context: Dict[str, str]
+    ) -> AsyncGenerator[List[SubscriptionGame], None]:
+        try:
+            tier = context[subscription_name]
+        except KeyError:
+            raise UnknownError(f'Unknown subscription name {subscription_name}!')
+        yield await self._backend_client.get_games_in_subscription(tier)
 
-    async def get_local_games(self):
+    async def get_local_games(self) -> List[LocalGame]:
         if self._local_games_update_in_progress:
-            logging.debug("LocalGames.update in progress, returning cached values")
+            logger.debug("LocalGames.update in progress, returning cached values")
             return self._local_games.local_games
 
         loop = asyncio.get_running_loop()
@@ -280,23 +290,23 @@ class OriginPlugin(Plugin):
 
         # don't overlap update operations
         if self._local_games_update_in_progress:
-            logging.debug("LocalGames.update in progress, skipping cache update")
+            logger.debug("LocalGames.update in progress, skipping cache update")
             return
 
         if time.time() - self._local_games_last_update < LOCAL_GAMES_CACHE_VALID_PERIOD:
-            logging.debug("Local games cache is fresh enough")
+            logger.debug("Local games cache is fresh enough")
             return
 
         loop = asyncio.get_running_loop()
         asyncio.create_task(notify_local_games_changed())
 
-    async def prepare_local_size_context(self, game_ids) -> Dict[str, pathlib.PurePath]:
-        game_id_crc_map = {}
+    async def prepare_local_size_context(self, game_ids: List[GameId]) -> Dict[str, pathlib.PurePath]:
+        game_id_crc_map: Dict[GameId, str] = {}
         for filepath, manifest in zip(self._local_games._manifests_stats.keys(), self._local_games._manifests):
             game_id_crc_map[manifest.game_id] = pathlib.PurePath(filepath).parent / 'map.crc'
         return game_id_crc_map
 
-    async def get_local_size(self, game_id, context: Dict[str, pathlib.PurePath]) -> Optional[int]:
+    async def get_local_size(self, game_id: GameId, context: Dict[str, pathlib.PurePath]) -> Optional[int]:
         try:
             return parse_map_crc_for_total_size(context[game_id])
         except (KeyError, FileNotFoundError) as e:
@@ -310,20 +320,26 @@ class OriginPlugin(Plugin):
                 return multiplayer_id
         return None
 
-    async def _get_game_times_for_offer(
+    async def _get_game_times_for_master_title(
         self,
-        offer_id: OfferId,
+        game_id: GameId,
         master_title_id: MasterTitleId,
         multiplayer_id: Optional[MultiplayerId],
         lastplayed_time: Optional[Timestamp]
     ) -> GameTime:
-        # returns None if a new entry should be retrieved
-        def get_cached_game_times(_offer_id: OfferId, _lastplayed_time: Optional[Timestamp]) -> Optional[GameTime]:
+        """
+        :param game_id - to get from cache
+        :param master_title_id - to fetch from backend
+        :param multiplayer_id - to fetch from backend
+        :param lastplayed_time - to decide on cache freshness
+        """
+        def get_cached_game_times(_game_id: GameId, _lastplayed_time: Optional[Timestamp]) -> Optional[GameTime]:
+            """"returns None if a new entry should be retrieved"""
             if _lastplayed_time is None:
                 # double-check if 'lastplayed_time' is unknown (maybe it was just to long ago)
                 return None
 
-            _cached_game_time: GameTime = self._game_time_cache.get(offer_id)
+            _cached_game_time: GameTime = self._game_time_cache.get(_game_id)
             if _cached_game_time is None or _cached_game_time.last_played_time is None:
                 # played time unknown yet
                 return None
@@ -332,37 +348,39 @@ class OriginPlugin(Plugin):
                 return None
             return _cached_game_time
 
-        cached_game_time: Optional[GameTime] = get_cached_game_times(offer_id, lastplayed_time)
+        cached_game_time: Optional[GameTime] = get_cached_game_times(game_id, lastplayed_time)
         if cached_game_time is not None:
             return cached_game_time
 
         response = await self._backend_client.get_game_time(self._user_id, master_title_id, multiplayer_id)
-        game_time: GameTime = GameTime(offer_id, response[0], response[1])
-        self._game_time_cache[offer_id] = game_time
+        game_time: GameTime = GameTime(game_id, response[0], response[1])
+        self._game_time_cache[game_id] = game_time
         self._persistent_cache_updated = True
         return game_time
 
-    async def prepare_game_times_context(self, game_ids: List[str]) -> Any:
+    async def prepare_game_times_context(self, game_ids: List[GameId]) -> Any:
         self._check_authenticated()
+        offer_ids = [self._offer_id_from_game_id(game_id) for game_id in game_ids]
 
         _, last_played_games = await asyncio.gather(
-            self._get_offers(game_ids),  # update local cache ignoring return value
+            self._get_offers(offer_ids),  # update local cache ignoring return value
             self._backend_client.get_lastplayed_games(self._user_id)
         )
 
         return last_played_games
 
-    async def get_game_time(self, game_id: OfferId, last_played_games: Any) -> GameTime:
+    async def get_game_time(self, game_id: GameId, last_played_games: Any) -> GameTime:
+        offer_id = self._offer_id_from_game_id(game_id)
         try:
-            offer = self._offer_id_cache.get(game_id)
+            offer = self._offer_id_cache.get(offer_id)
             if offer is None:
-                logging.exception("Internal cache out of sync")
+                logger.exception("Internal cache out of sync")
                 raise UnknownError()
 
             master_title_id: MasterTitleId = offer["masterTitleId"]
             multiplayer_id: Optional[MultiplayerId] = self._get_multiplayer_id(offer)
 
-            return await self._get_game_times_for_offer(
+            return await self._get_game_times_for_master_title(
                 game_id,
                 master_title_id,
                 multiplayer_id,
@@ -370,33 +388,32 @@ class OriginPlugin(Plugin):
             )
 
         except KeyError as e:
-            logging.exception("Failed to import game times %s", repr(e))
+            logger.exception("Failed to import game times %s", repr(e))
             raise UnknownBackendResponse()
-
-    async def prepare_game_library_settings_context(self, game_ids: List[str]) -> Any:
-        self._check_authenticated()
-        hidden_games = await self._backend_client.get_hidden_games(self._user_id)
-        favorite_games = await self._backend_client.get_favorite_games(self._user_id)
-
-        library_context = {}
-        for game_id in game_ids:
-            library_context[game_id] = {'hidden': game_id in hidden_games, 'favorite': game_id in favorite_games}
-        return library_context
-
-    async def get_game_library_settings(self, game_id: str, context: Any) -> GameLibrarySettings:
-        if not context:
-            # Unable to retrieve context
-            return GameLibrarySettings(game_id, None, None)
-        game_library_settings = context.get(game_id)
-        if game_library_settings is None:
-            # Able to retrieve context but game is not in its values -> It doesnt have any tags or hidden status set
-            return GameLibrarySettings(game_id, [], False)
-        return GameLibrarySettings(game_id, ['favorite'] if game_library_settings['favorite'] else [], game_library_settings['hidden'])
 
     def game_times_import_complete(self):
         if self._persistent_cache_updated:
             self.push_cache()
             self._persistent_cache_updated = False
+
+    async def prepare_game_library_settings_context(self, game_ids: List[GameId]) -> GameLibrarySettingsContext:
+        self._check_authenticated()
+        favorite_games, hidden_games = await asyncio.gather(
+            self._backend_client.get_favorite_games(self._user_id),
+            self._backend_client.get_hidden_games(self._user_id)
+        )
+        return GameLibrarySettingsContext(
+            favorite=favorite_games,
+            hidden=hidden_games
+        )
+
+    async def get_game_library_settings(self, game_id: GameId, context: GameLibrarySettingsContext) -> GameLibrarySettings:
+        normalized_id = game_id.strip("@subscription")
+        return GameLibrarySettings(
+            game_id,
+            tags=['favorite'] if normalized_id in context.favorite else [],
+            hidden=normalized_id in context.hidden
+        )
 
     async def get_friends(self):
         self._check_authenticated()
@@ -406,28 +423,51 @@ class OriginPlugin(Plugin):
             for user_id, user_name in (await self._backend_client.get_friends(self._user_id)).items()
         ]
 
-    async def launch_game(self, game_id):
+    @staticmethod
+    def _open_uri(uri):
+        logger.info("Opening {}".format(uri))
+        webbrowser.open(uri)
+    
+    async def launch_game(self, game_id: GameId):
         if is_uri_handler_installed("origin2"):
-            entitlement = self._entitlement_cache.get(game_id)
-            if entitlement and 'externalType' in entitlement:
-                game_id += '@' + entitlement['externalType'].lower()
-            webbrowser.open("origin2://game/launch?offerIds={}&autoDownload=true".format(game_id))
+            uri = "origin2://game/launch?offerIds={}&autoDownload=1".format(game_id)
         else:
-            webbrowser.open("https://www.origin.com/download")
+            uri = "https://www.origin.com/download"
 
-    async def install_game(self, game_id):
-        if is_uri_handler_installed("origin2"):
-            webbrowser.open("origin2://game/download?offerId={}".format(game_id))
+        self._open_uri(uri)
+
+    async def install_game(self, game_id: GameId):
+
+        def is_subscription_game(game_id: GameId) -> bool:
+            return game_id.endswith('subscription')
+
+        def is_offer_missing_from_user_library(offer_id: OfferId):
+            return offer_id not in self._offer_id_cache
+        
+        async def get_subscription_game_store_uri(offer_id):
+            try:
+                offer = await self._backend_client.get_offer(offer_id)
+                return "https://www.origin.com/store/{}".format(offer["gdpPath"])
+            except (KeyError, UnknownError, BackendError, UnknownBackendResponse):
+                return "https://www.origin.com/store/ea-play/play-list"
+
+        offer_id = self._offer_id_from_game_id(game_id)
+        if is_subscription_game(game_id) and is_offer_missing_from_user_library(offer_id):
+            uri = await get_subscription_game_store_uri(offer_id)
+        elif is_uri_handler_installed("origin2"):
+            uri = f"origin2://game/download?offerId={game_id}"
         else:
-            webbrowser.open("https://www.origin.com/download")
+            uri = "https://www.origin.com/download"
+
+        self._open_uri(uri)
 
     if is_windows():
-        async def uninstall_game(self, game_id):
+        async def uninstall_game(self, game_id: GameId):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, partial(subprocess.run, ["control", "appwiz.cpl"]))
 
     async def shutdown_platform_client(self) -> None:
-        webbrowser.open("origin://quit")
+        self._open_uri("origin://quit")
 
     def _store_cookies(self, cookies):
         credentials = {
@@ -443,31 +483,36 @@ class OriginPlugin(Plugin):
 
     def handshake_complete(self):
         def game_time_decoder(cache: Dict) -> Dict[OfferId, GameTime]:
-            def parse_last_played_time(entry):
-                # old cache might still contains 0 after plugin upgrade
-                lpt = entry.get("last_played_time")
-                if lpt == 0:
-                    return None
-                return lpt
+
+            # after offerId -> gameId migration
+            outdated_keys = [key.split('@')[0] for key in cache if "@" in key]
+            for i in outdated_keys:
+                cache.pop(i, None)
 
             return {
-                offer_id: GameTime(entry["game_id"], entry["time_played"], parse_last_played_time(entry))
-                for offer_id, entry in cache.items()
-                if entry and offer_id
+                game_id: GameTime(entry["game_id"], entry["time_played"], entry.get("last_played_time"))
+                for game_id, entry in cache.items()
+                if entry and game_id
             }
 
         def safe_decode(_cache: Dict, _key: str, _decoder: Callable):
             if not _cache:
                 return {}
+            if _decoder is None:
+                _decoder = lambda x: x
 
             try:
                 return _decoder(json.loads(_cache))
             except Exception:
-                logging.exception("Failed to decode persistent '%s' cache", _key)
+                logger.exception("Failed to decode persistent '%s' cache", _key)
                 return {}
 
         # parse caches
-        for key, decoder in (("offers", lambda x: x), ("game_time", game_time_decoder), ("entitlements", lambda x: x)):
+        cache_decoders = {
+            "offers": None,
+            "game_time": game_time_decoder,
+        }
+        for key, decoder in cache_decoders.items():
             self.persistent_cache[key] = safe_decode(self.persistent_cache.get(key), key, decoder)
 
         self._http_client.load_lats_from_cache(self.persistent_cache.get('lats'))

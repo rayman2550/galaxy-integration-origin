@@ -17,7 +17,8 @@ SIMPLE_ACHIEVEMENTS_SETS ={
 }
 
 SPECIAL_ACHIEVEMENTS_SETS = {
-    "DR:225064100": "BF_BF3_PC"
+    "DR:225064100": "BF_BF3_PC",
+    "OFB-EAST:48217@subscription": None
 }
 
 ACHIEVEMENT_SETS = {**SIMPLE_ACHIEVEMENTS_SETS, **SPECIAL_ACHIEVEMENTS_SETS}
@@ -49,7 +50,8 @@ ACHIEVEMENTS = {
         Achievement(1480870347, "1", "The Student..."),
         Achievement(1480870977, "3", "The Graduate"),
         Achievement(1483373394, "50", "Free Association")
-    ]
+    ],
+    "OFB-EAST:48217@subscription": [],
 }
 
 MULTIPLE_ACHIEVEMENTS_SETS_BACKEND_RESPONSE = {
@@ -134,7 +136,6 @@ SINGLE_ACHIEVEMENTS_SET_BACKEND_PARSED = {
     "BF_BF3_PC": ACHIEVEMENTS["DR:225064100"]
 }
 
-
 SINGLE_ACHIEVEMENTS_SET_BACKEND_RESPONSE = {
     "XP2ACH02_00": {
         "complete": True,
@@ -169,12 +170,11 @@ async def test_not_authenticated(plugin, http_client):
 @pytest.mark.asyncio
 async def test_achievements_context_preparation(
     authenticated_plugin,
-    user_id,
     persona_id,
     backend_client
 ):
     authenticated_plugin._get_owned_offers = AsyncMock()
-    authenticated_plugin._get_owned_offers.return_value = []
+    authenticated_plugin._get_owned_offers.return_value = {}
     await authenticated_plugin.prepare_achievements_context(None)
 
 
@@ -186,7 +186,6 @@ async def test_achievements_context_preparation(
 async def test_get_unlocked_achievements_simple(
     authenticated_plugin,
     backend_client,
-    user_id
 ):
     for game_id in SIMPLE_ACHIEVEMENTS_SETS.keys():
         assert ACHIEVEMENTS[game_id] == await authenticated_plugin.get_unlocked_achievements(

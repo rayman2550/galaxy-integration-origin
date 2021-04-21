@@ -1,9 +1,11 @@
 import logging
+import json
 import time
 import random
 import xml.etree.ElementTree as ET
+from collections import namedtuple
 from datetime import datetime
-from typing import Dict, List, NewType, Optional
+from typing import Dict, List, NewType, Optional, Set, Any, Tuple
 
 import aiohttp
 from galaxy.api.errors import (
@@ -14,11 +16,18 @@ from galaxy.api.types import Achievement, SubscriptionGame, Subscription
 from galaxy.http import HttpClient
 from yarl import URL
 
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
 MasterTitleId = NewType("MasterTitleId", str)
 AchievementSet = NewType("AchievementSet", str)
 OfferId = NewType("OfferId", str)
 Timestamp = NewType("Timestamp", int)
+Json = Dict[str, Any]  # helper alias for general purpose
 
+SubscriptionDetails = namedtuple('SubscriptionDetails', ['tier', 'end_time'])
 
 
 class CookieJar(aiohttp.CookieJar):
@@ -80,10 +89,10 @@ class AuthenticatedHttpClient(HttpClient):
         try:
             await self._get_access_token()
         except (BackendNotAvailable, BackendTimeout, BackendError, NetworkError):
-            logging.warning("Failed to refresh token for independent reasons")
+            logger.warning("Failed to refresh token for independent reasons")
             raise
         except Exception:
-            logging.exception("Failed to refresh token")
+            logger.exception("Failed to refresh token")
             self._access_token = None
             if self._auth_lost_callback:
                 self._auth_lost_callback()
@@ -110,7 +119,7 @@ class AuthenticatedHttpClient(HttpClient):
                 else:
                     raise UnknownBackendResponse(data)
             except AttributeError:
-                logging.exception(f"Error parsing access token: {repr(e)}, data: {data}")
+                logger.exception(f"Error parsing access token: {repr(e)}, data: {data}")
                 raise UnknownBackendResponse
         else:
             self._save_lats()
@@ -132,14 +141,14 @@ class AuthenticatedHttpClient(HttpClient):
         try:
             utag_main_cookie = next(filter(lambda c: c.key == 'utag_main', self._cookie_jar))
             utag_main = {i.split(':')[0]: i.split(':')[1] for i in utag_main_cookie.value.split('$')}
-            logging.info('now: %s st: %s ses_id: %s lats: %s',
+            logger.info('now: %s st: %s ses_id: %s lats: %s',
                 str(int(time.time())),
                 utag_main['_st'][:10],
                 utag_main['ses_id'][:10],
                 str(self._last_access_token_success)
             )
         except Exception as e:
-            logging.warning('Failed to get session duration: %s', repr(e))
+            logger.warning('Failed to get session duration: %s', repr(e))
 
 
 class OriginBackendClient:
@@ -150,7 +159,7 @@ class OriginBackendClient:
     def _get_api_host():
         return "https://api{}.origin.com".format(random.randint(1, 4))
 
-    async def get_identity(self):
+    async def get_identity(self) -> Tuple[str, str, str]:
         pid_response = await self._http_client.get(
             "https://gateway.ea.com/proxy/identity/pids/me"
         )
@@ -169,10 +178,10 @@ class OriginBackendClient:
 
             return str(user_id), str(persona_id), str(user_name)
         except (ET.ParseError, AttributeError) as e:
-            logging.exception("Can not parse backend response: %s, error %s", content, repr(e))
+            logger.exception("Can not parse backend response: %s, error %s", content, repr(e))
             raise UnknownBackendResponse()
 
-    async def get_entitlements(self, user_id):
+    async def get_entitlements(self, user_id) -> List[Json]:
         url = "{}/ecommerce2/consolidatedentitlements/{}?machine_hash=1".format(
             self._get_api_host(),
             user_id
@@ -183,12 +192,13 @@ class OriginBackendClient:
         response = await self._http_client.get(url, headers=headers)
         try:
             data = await response.json()
+            logger.debug(json.dumps(data))
             return data["entitlements"]
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse backend response: %s, error %s", await response.text(), repr(e))
+            logger.exception("Can not parse backend response: %s, error %s", await response.text(), repr(e))
             raise UnknownBackendResponse()
 
-    async def get_offer(self, offer_id):
+    async def get_offer(self, offer_id) -> Json:
         url = "{}/ecommerce2/public/supercat/{}/{}".format(
             self._get_api_host(),
             offer_id,
@@ -198,7 +208,7 @@ class OriginBackendClient:
         try:
             return await response.json()
         except ValueError as e:
-            logging.exception("Can not parse backend response: %s, error %s", await response.text, repr(e))
+            logger.exception("Can not parse backend response: %s, error %s", await response.text, repr(e))
             raise UnknownBackendResponse()
 
     async def get_achievements(self, persona_id: str, achievement_set: str = None) \
@@ -244,7 +254,7 @@ class OriginBackendClient:
             }
 
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse achievements from backend response %s", repr(e))
+            logger.exception("Can not parse achievements from backend response %s", repr(e))
             raise UnknownBackendResponse()
 
     async def get_game_time(self, user_id, master_title_id, multiplayer_id):
@@ -284,7 +294,7 @@ class OriginBackendClient:
 
             return total_play_time, parse_last_played_time(xml_response.find("lastSessionEndTimeStamp"))
         except (ET.ParseError, AttributeError, ValueError) as e:
-            logging.exception("Can not parse backend response: %s, %s", await response.text(), repr(e))
+            logger.exception("Can not parse backend response: %s, %s", await response.text(), repr(e))
             raise UnknownBackendResponse()
 
     async def get_friends(self, user_id):
@@ -319,7 +329,7 @@ class OriginBackendClient:
                 for user_xml in ET.ElementTree(ET.fromstring(content)).iter("user")
             }
         except (ET.ParseError, AttributeError, ValueError):
-            logging.exception("Can not parse backend response: %s", await response.text())
+            logger.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse()
 
     async def get_lastplayed_games(self, user_id) -> Dict[MasterTitleId, Timestamp]:
@@ -362,10 +372,10 @@ class OriginBackendClient:
                 for product_info_xml in ET.ElementTree(ET.fromstring(content)).iter("lastPlayed")
             }
         except (ET.ParseError, AttributeError, ValueError) as e:
-            logging.exception("Can not parse backend response: %s", await response.text())
+            logger.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse(e)
 
-    async def get_favorite_games(self, user_id):
+    async def get_favorite_games(self, user_id) -> Set[OfferId]:
         response = await self._http_client.get("{base_api}/atom/users/{user_id}/privacySettings/FAVORITEGAMES".format(
             base_api=self._get_api_host(),
             user_id=user_id
@@ -387,16 +397,16 @@ class OriginBackendClient:
             payload_xml = ET.ElementTree(ET.fromstring(content)).find("privacySetting/payload")
             if payload_xml is None or payload_xml.text is None:
                 # No games tagged, if on object evaluates to false
-                return []
+                return set()
 
-            favorite_games = set(payload_xml.text.split(';'))
+            favorite_games = set(OfferId(payload_xml.text.split(';')))
 
             return favorite_games
         except (ET.ParseError, AttributeError, ValueError):
-            logging.exception("Can not parse backend response: %s", await response.text())
+            logger.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse()
 
-    async def get_hidden_games(self, user_id):
+    async def get_hidden_games(self, user_id) -> Set[OfferId]:
         response = await self._http_client.get("{base_api}/atom/users/{user_id}/privacySettings/HIDDENGAMES".format(
             base_api=self._get_api_host(),
             user_id=user_id
@@ -418,16 +428,23 @@ class OriginBackendClient:
             payload_xml = ET.ElementTree(ET.fromstring(content)).find("privacySetting/payload")
             if payload_xml is None or payload_xml.text is None:
                 # No games tagged, if on object evaluates to false
-                return []
+                return set()
             payload_text = payload_xml.text.replace('1.0|', '')
-            hidden_games = set(payload_text.split(';'))
+            hidden_games = set(OfferId(payload_text.split(';')))
 
             return hidden_games
         except (ET.ParseError, AttributeError, ValueError):
-            logging.exception("Can not parse backend response: %s", await response.text())
+            logger.exception("Can not parse backend response: %s", await response.text())
             raise UnknownBackendResponse()
 
-    async def _get_subscription_status(self, subscription_uri):
+    def _get_subscription_status(self, response_data: Dict) -> Optional[str]:
+        try:
+            return response_data['Subscription']['status'].lower() if response_data else None
+        except (ValueError, KeyError) as e:
+            logger.exception("No 'status' key in response", response_data, repr(e))
+            raise UnknownBackendResponse()
+
+    async def _get_active_subscription(self, subscription_uri) -> Optional[SubscriptionDetails]:
         def parse_timestamp(timestamp: str) -> Timestamp:
             return Timestamp(
                 int((datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S") - datetime(1970, 1, 1)).total_seconds()))
@@ -435,56 +452,69 @@ class OriginBackendClient:
         response = await self._http_client.get(subscription_uri)
         try:
             data = await response.json()
-            if data and data['Subscription']['status'].lower() == 'enabled':
-                return {'tier': data['Subscription']['subscriptionLevel'].lower(),
-                        'end_time': parse_timestamp(data['Subscription']['nextBillingDate'])}
+            sub_status = self._get_subscription_status(data)
+            if data and sub_status == 'enabled':
+                return SubscriptionDetails(
+                    tier=data['Subscription']['subscriptionLevel'].lower(),
+                    end_time=parse_timestamp(data['Subscription']['nextBillingDate'])
+                )
             else:
+                logger.debug(f"Cannot get data from response or subscription status is not 'ENABLED': {data}")
                 return None
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse backend response while getting subs details: %s, error %s", await response.text(), repr(e))
+            logger.exception("Can not parse backend response while getting subs details: %s, error %s", await response.text(), repr(e))
             raise UnknownBackendResponse()
 
-    async def _get_subscription_uri(self, user_id):
+    async def _get_subscription_uris(self, user_id) -> List[str]:
         url = f"https://gateway.ea.com/proxy/subscription/pids/{user_id}/subscriptionsv2/groups/Origin Membership"
         response = await self._http_client.get(url)
         try:
             data = await response.json()
-            if 'subscriptionUri' in data:
-                return f"https://gateway.ea.com/proxy/subscription/pids/{user_id}{data['subscriptionUri'][0]}"
-            else:
-                return None
+            return [
+                f"https://gateway.ea.com/proxy/subscription/pids/{user_id}{path}"
+                for path in data.get('subscriptionUri', [])
+            ]
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse backend response while getting subs uri: %s, error %s", await response.text(), repr(e))
+            logger.exception("Can not parse backend response while getting subs uri: %s, error %s", await response.text(), repr(e))
             raise UnknownBackendResponse()
 
     async def get_subscriptions(self, user_id) -> List[Subscription]:
         subs = {'standard': Subscription(subscription_name='EA Play', owned=False),
                 'premium': Subscription(subscription_name='EA Play Pro', owned=False)}
-
-        subscription_uri = await self._get_subscription_uri(user_id)
-        if subscription_uri:
-            sub_status = await self._get_subscription_status(subscription_uri)
-            logging.debug(f'sub_status: {sub_status}')
-            try:
-                if sub_status:
-                    subs[sub_status['tier']].owned = True
-                    subs[sub_status['tier']].end_time = sub_status['end_time']
-            except (ValueError, KeyError) as e:
-                logging.exception("Unknown subscription tier, error %s", repr(e))
-                raise UnknownBackendResponse()
+        for uri in await self._get_subscription_uris(user_id):
+            user_sub = await self._get_active_subscription(uri)
+            if user_sub:
+                break
         else:
-            logging.debug('no subscription active')
+            user_sub = None
+        logger.debug(f'user_sub: {user_sub}')
+        try:
+            if user_sub:
+                subs[user_sub.tier].owned = True
+                subs[user_sub.tier].end_time = user_sub.end_time
+        except (ValueError, KeyError) as e:
+            logger.exception("Unknown subscription tier, error %s", repr(e))
+            raise UnknownBackendResponse()
         return [subs['standard'], subs['premium']]
 
-    async def get_games_in_subscription(self, tier):
-        url = f"https://api3.origin.com/ecommerce2/vaultInfo/Origin Membership/tiers/{tier}"
+    async def get_games_in_subscription(self, tier) -> List[SubscriptionGame]:
+        """
+            Note: `game_id` of an returned subscription game may not match with `game_id` of the game added to user library!
+        """
+        url = f"{self._get_api_host()}/ecommerce2/vaultInfo/Origin Membership/tiers/{tier}"
         headers = {
             "Accept": "application/vnd.origin.v3+json; x-cache/force-write"
         }
         response = await self._http_client.get(url, headers=headers)
         try:
             games = await response.json()
-            return [SubscriptionGame(game_title=game['displayName'], game_id=game['offerId']) for game in games['game']]
+            subscription_suffix = '@subscription'  # externalType for compatibility with owned games interface
+            return [
+                SubscriptionGame(
+                    game_title=game['displayName'],
+                    game_id=game['offerId'] + subscription_suffix
+                ) for game in games['game']
+            ]
         except (ValueError, KeyError) as e:
-            logging.exception("Can not parse backend response while getting subs games: %s, error %s", await response.text(), repr(e))
+            logger.exception("Can not parse backend response while getting subs games: %s, error %s", await response.text(), repr(e))
             raise UnknownBackendResponse()

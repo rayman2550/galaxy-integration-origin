@@ -22,6 +22,9 @@ from galaxy.api.errors import FailedParsingManifest
 from galaxy.api.types import LocalGame, LocalGameState
 
 
+logger = logging.getLogger(__name__)
+
+
 class _State(Enum):
     kInvalid = auto()
     kError = auto()
@@ -50,6 +53,11 @@ class _State(Enum):
     kFetchLicense = auto()
     kCompleted = auto()
 
+    @classmethod
+    def _missing_(cls, value):
+        logging.warning('Unrecognized state: %s' % value)
+        return cls.kInvalid
+
 
 @dataclass
 class _Manifest:
@@ -72,9 +80,12 @@ def _parse_msft_file(filepath):
         data = file.read()
     parsed_url = urllib.parse.urlparse(data)
     parsed_data = dict(urllib.parse.parse_qsl(parsed_url.query))
-    game_id = parsed_data["id"]
-    state = _State[parsed_data.get("currentstate", _State.kInvalid.name)]
-    prev_state = _State[parsed_data.get("previousstate", _State.kInvalid.name)]
+    try:
+        game_id = parsed_data["id"]
+    except KeyError as e:
+        raise FailedParsingManifest({"file": filepath, "exception": e, "parsed_data": parsed_data})
+    state = _State[parsed_data.get("currentstate", "<missing currentstate>")]
+    prev_state = _State[parsed_data.get("previousstate", "<missing previousstate>")]
     ddinstallalreadycompleted = parsed_data.get("ddinstallalreadycompleted", "0")
     dipinstallpath = parsed_data.get("dipinstallpath", "")
     ddinitialdownload = parsed_data.get("ddinitialdownload", "0")
@@ -86,11 +97,13 @@ def get_local_games_manifests(manifests_stats):
     manifests = []
     for filename in manifests_stats.keys():
         try:
-            manifests.append(_parse_msft_file(filename))
+            parsed_mfst_file = _parse_msft_file(filename)
+        except FailedParsingManifest as e:
+            logging.warning("Failed to parse file %s: %s", filename, e.data)
         except Exception as e:
-            logging.exception("Failed to parse file {}".format(filename))
-            raise FailedParsingManifest({"file": filename, "exception": e})
-
+            logging.exception(repr(e))
+        else:
+            manifests.append(parsed_mfst_file)
     return manifests
 
 
@@ -156,7 +169,7 @@ if platform.system() == "Windows":
             for pid in get_process_ids():
                 yield get_process_info(pid)
         except OSError:
-            logging.exception("Failed to iterate over the process list")
+            logger.exception("Failed to iterate over the process list")
             pass
 
 else:
@@ -169,7 +182,7 @@ else:
             except StopIteration:
                 raise
             except Exception:
-                logging.exception("Failed to get information for PID=%s" % pid)
+                logger.exception("Failed to get information for PID=%s" % pid)
 
 
 def read_state(manifest : _Manifest) -> OriginGameState:
@@ -244,7 +257,7 @@ def get_local_content_path():
     platform_id = platform.system()
 
     if platform_id == "Windows":
-        local_content_path = os.path.join(os.environ.get("ProgramData", os.environ.get("SystemDrive", "C:") + "\ProgramData"), "Origin", "LocalContent")
+        local_content_path = os.path.join(os.environ.get("ProgramData", os.environ.get("SystemDrive", "C:") + R"\ProgramData"), "Origin", "LocalContent")
     elif platform_id == "Darwin":
         local_content_path = os.path.join(os.sep, "Library", "Application Support", "Origin", "LocalContent")
     else:
@@ -264,7 +277,7 @@ class LocalGames:
         except FailedParsingManifest as e:
             self._manifests = []
             self._local_games = []
-            logging.warning("Failed to parse local games on start: {}, {}".format(e.message, e.data))
+            logger.warning("Failed to parse local games on start: {}, {}".format(e.message, e.data))
             return
 
         self._local_games = get_local_games_from_manifests(self._manifests)
