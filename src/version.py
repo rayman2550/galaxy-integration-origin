@@ -1,6 +1,12 @@
-__version__ = "0.39"
+__version__ = "0.40"
 
 __changelog__ = {
+    "unreleased":"""""",
+    "0.40":
+    """
+        - `get_local_size`: return `None` if map.crc not found instead of raising error
+        - fix detecting installed launcher & games when EA Desktop is installed
+    """,
     "0.39":
     """
         - update Galaxy API version to 0.68

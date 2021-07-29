@@ -1,42 +1,42 @@
 import platform
 
+
 if platform.system().lower() == "windows":
 
     import winreg
-    import shlex
     import os
 
-    def is_uri_handler_installed(protocol):
+    def _get_path_from_cmd_template(cmd_template) -> str:
+        return cmd_template.replace("\"", "").partition("%")[0].strip()
+
+    def is_uri_handler_installed(protocol) -> bool:
         try:
-            key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"{}\shell\open\command".format(protocol))
+            with winreg.OpenKey(
+                winreg.HKEY_CLASSES_ROOT, r"{}\shell\open\command".format(protocol)
+            ) as key:
+                executable_template = winreg.QueryValue(key, None)
+                path = _get_path_from_cmd_template(executable_template)
+                return os.path.exists(path)
         except OSError:
             return False
 
-        try:
-            executable_template = winreg.QueryValue(key, None)
-            splitted_exec = shlex.split(executable_template)
-            if not splitted_exec:
-                return False
-            return os.path.exists(splitted_exec[0])
-        except ValueError:
-            return False
-        finally:
-            winreg.CloseKey(key)
-
-        return True
 
 elif platform.system().lower() == "darwin":
 
     from CoreServices.LaunchServices import LSCopyDefaultHandlerForURLScheme
     from AppKit import NSWorkspace
 
-    def is_uri_handler_installed(protocol):
+    def is_uri_handler_installed(protocol) -> bool:
         bundle_id = LSCopyDefaultHandlerForURLScheme(protocol)
         if not bundle_id:
             return False
-        return NSWorkspace.sharedWorkspace().absolutePathForAppBundleWithIdentifier_(bundle_id) is not None
+        return (
+            NSWorkspace.sharedWorkspace().absolutePathForAppBundleWithIdentifier_(bundle_id)
+            is not None
+        )
+
 
 else:
 
-    def is_uri_handler_installed(protocol):
+    def is_uri_handler_installed(protocol) -> bool:
         return False

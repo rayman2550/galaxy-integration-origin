@@ -309,8 +309,10 @@ class OriginPlugin(Plugin):
     async def get_local_size(self, game_id: GameId, context: Dict[str, pathlib.PurePath]) -> Optional[int]:
         try:
             return parse_map_crc_for_total_size(context[game_id])
-        except (KeyError, FileNotFoundError) as e:
-            raise UnknownError(f"Manifest for game {game_id} is not found: {repr(e)} | context: {context}")
+        except FileNotFoundError:
+            return None
+        except KeyError:
+            raise UnknownError("Manifest not found")
 
     @staticmethod
     def _get_multiplayer_id(offer) -> Optional[MultiplayerId]:
